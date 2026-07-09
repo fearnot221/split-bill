@@ -14,7 +14,7 @@ for (const f of ['style.css', 'app.js']) {
 let html = fs.readFileSync(path.join(pub, 'index.html'), 'utf8');
 const appTag = '<script src="app.js';
 if (!html.includes(appTag)) throw new Error('public/index.html 找不到 app.js script 標籤');
-html = html.replace(appTag, `<script src="local-store.js?v=1"></script>\n  ${appTag}`);
+html = html.replace(appTag, `<script src="remote-store.js?v=1"></script>\n  ${appTag}`);
 fs.writeFileSync(path.join(out, 'index.html'), html);
 
 fs.writeFileSync(path.join(out, 'CNAME'), 'bill.fearnot.tw\n');
