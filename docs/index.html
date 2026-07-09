@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#f5f3ee">
+  <title>分帳趣 — 記帳分帳</title>
+  <link rel="stylesheet" href="style.css?v=6">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%2344705a'/><text x='50' y='72' font-size='60' text-anchor='middle' fill='white' font-family='Helvetica,Arial,sans-serif' font-weight='bold'>$</text></svg>">
+</head>
+<body>
+
+  <div id="view-group" class="view">
+    <header class="group-header">
+      <span class="overline">分帳趣</span>
+      <h1 id="group-name">記帳簿</h1>
+    </header>
+
+    <div class="summary-wrap">
+      <div class="stat-strip">
+        <div class="stat">
+          <span class="stat-label">本月支出</span>
+          <span class="stat-value" id="month-total">$0</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">總支出</span>
+          <span class="stat-value" id="total-amount">$0</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">我的結餘</span>
+          <span class="stat-value" id="my-balance">$0</span>
+        </div>
+      </div>
+    </div>
+
+    <main class="container">
+      <!-- 支出列表 -->
+      <section id="tab-expenses" class="tab-panel">
+        <div class="filter-bar">
+          <input type="search" id="filter-text" placeholder="搜尋說明、付款人…" autocomplete="off">
+          <div class="chip-row" id="filter-cats"></div>
+        </div>
+        <ul id="expense-list" class="expense-list"></ul>
+        <p id="expense-empty" class="empty-hint hidden">還沒有任何支出，點右下角「＋」新增第一筆吧！</p>
+      </section>
+
+      <!-- 結算 -->
+      <section id="tab-settle" class="tab-panel hidden">
+        <div class="card">
+          <h2>成員結餘</h2>
+          <ul id="balance-list" class="balance-list"></ul>
+        </div>
+        <div class="card">
+          <h2>結算方案</h2>
+          <p class="hint">按「已還款」會記錄一筆還款，結餘自動更新。</p>
+          <ul id="settlement-list" class="settlement-list"></ul>
+          <p id="settle-empty" class="empty-hint hidden">目前大家互不相欠</p>
+        </div>
+      </section>
+
+      <!-- 統計 -->
+      <section id="tab-stats" class="tab-panel hidden">
+        <div class="stats-head">
+          <label for="stats-month" class="visually-hidden">統計期間</label>
+          <select id="stats-month"></select>
+        </div>
+        <div class="stat-strip">
+          <div class="stat">
+            <span class="stat-label">支出總額</span>
+            <span class="stat-value" id="stat-total">$0</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">筆數</span>
+            <span class="stat-value" id="stat-count">0</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">平均每筆</span>
+            <span class="stat-value" id="stat-avg">$0</span>
+          </div>
+        </div>
+        <div class="card">
+          <h2>分類統計</h2>
+          <ul id="cat-stats" class="bar-list"></ul>
+          <p id="stats-empty" class="empty-hint hidden">這段期間沒有支出紀錄</p>
+        </div>
+        <div class="card">
+          <h2>成員統計</h2>
+          <ul id="member-stats" class="bar-list"></ul>
+        </div>
+        <button id="btn-export" class="btn btn-ghost">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+          匯出 CSV
+        </button>
+      </section>
+
+      <!-- 成員 / 設定 -->
+      <section id="tab-members" class="tab-panel hidden">
+        <div class="card">
+          <h2>成員</h2>
+          <p class="hint">把常一起分帳的朋友加進來，記帳時就能選他們分攤。</p>
+          <ul id="member-list" class="member-list"></ul>
+          <form id="form-add-member" class="inline-form">
+            <input type="text" id="new-member-name" placeholder="新成員名字" maxlength="20" required>
+            <button type="submit" class="btn btn-secondary btn-sm">新增</button>
+          </form>
+        </div>
+        <div class="card">
+          <h2>帳本設定</h2>
+          <form id="form-rename" class="inline-form">
+            <input type="text" id="ledger-name" placeholder="帳本名稱" maxlength="30" required>
+            <button type="submit" class="btn btn-secondary btn-sm">儲存</button>
+          </form>
+        </div>
+      </section>
+    </main>
+
+    <button id="btn-add-expense" class="fab" aria-label="新增支出">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+    </button>
+
+    <nav class="tab-bar">
+      <button class="tab-btn active" data-tab="expenses">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z"/><path d="M16 8h-6"/><path d="M16 12H8"/></svg>
+        <span>支出</span>
+      </button>
+      <button class="tab-btn" data-tab="settle">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="M7 21h10"/><path d="M12 3v18"/><path d="M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2"/></svg>
+        <span>結算</span>
+      </button>
+      <button class="tab-btn" data-tab="stats">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg>
+        <span>統計</span>
+      </button>
+      <button class="tab-btn" data-tab="members">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        <span>成員</span>
+      </button>
+    </nav>
+  </div>
+
+  <!-- ===== 新增 / 編輯支出 Modal ===== -->
+  <div id="modal-expense" class="modal hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2 id="modal-title">新增支出</h2>
+        <button id="btn-close-modal" class="icon-btn" aria-label="關閉">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+      </div>
+      <form id="form-expense">
+        <label>項目說明
+          <input type="text" id="exp-desc" placeholder="例如：晚餐、車票" maxlength="50" required>
+        </label>
+        <div class="row-2">
+          <label>金額
+            <input type="number" id="exp-amount" placeholder="0" min="0.01" step="0.01" inputmode="decimal" required>
+          </label>
+          <label>日期
+            <input type="date" id="exp-date" required>
+          </label>
+        </div>
+        <label>分類</label>
+        <div id="exp-categories" class="chip-row"></div>
+        <label>付款人
+          <select id="exp-payer"></select>
+        </label>
+        <div class="split-header">
+          <label>分攤方式</label>
+          <div class="seg">
+            <button type="button" id="split-equal" class="seg-btn active">均分</button>
+            <button type="button" id="split-custom" class="seg-btn">自訂金額</button>
+          </div>
+        </div>
+        <ul id="split-members" class="split-list"></ul>
+        <p id="split-remain" class="hint-block hidden"></p>
+        <button type="submit" class="btn btn-primary">儲存支出</button>
+      </form>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="local-store.js?v=1"></script>
+  <script src="app.js?v=6"></script>
+</body>
+</html>
