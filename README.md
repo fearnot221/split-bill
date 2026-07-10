@@ -2,7 +2,7 @@
 
 單一帳本的記帳分帳工具：把朋友加進成員清單，記錄誰付了錢、怎麼分攤，自動算清誰欠誰。支援手機、平板、桌面（響應式設計＋深色模式）。
 
-**線上版**：<https://bill.fearnot.tw>（GitHub Pages 靜態版，資料存為私人 repo `split-bill-data` 的 `data.json`，跨裝置同步）
+**線上版**：<https://bill.fearnot.tw>（自架伺服器，所有裝置共用同一份資料）
 
 ## 功能
 
@@ -16,29 +16,7 @@
 - **搜尋與篩選**：關鍵字搜尋＋分類快篩
 - **CSV 匯出**：一鍵下載完整帳目（Excel 可直接開啟）
 
-## 兩種執行方式
-
-| 模式 | 資料存放 | 適用情境 |
-|---|---|---|
-| **靜態版**（`docs/`，GitHub Pages） | 私人 repo `split-bill-data` 的 `data.json`（GitHub Contents API） | 免自架伺服器，跨裝置同步，改動有完整 git 歷史可回溯 |
-| **伺服器版**（`server.js`） | SQLite（`data.db`） | 本機或自架伺服器 |
-
-### 靜態版（GitHub Pages）
-
-資料層在 `docs/remote-store.js`：瀏覽器直接讀寫 `fearnot221/split-bill-data` 私人 repo 的 `data.json`，每次修改都是一個 commit。localStorage 只存連線設定（token），不存帳目。
-
-第一次在某台裝置使用時需輸入 Fine-grained Personal Access Token：
-
-1. GitHub → Settings → Developer settings → Fine-grained tokens → Generate new token
-2. Repository access 只選 `split-bill-data`
-3. Permissions 給 **Contents: Read and write**
-4. 貼進網頁的連線設定畫面即可
-
-同一份 token 可在多台裝置使用；在「成員」分頁最下方可中斷連線。寫入衝突（兩台裝置同時記帳）會自動重拉最新資料再套用。
-
-前端改完後執行 `npm run build:pages`，會把 `public/` 的前端複製到 `docs/` 並注入 `remote-store.js`，推上 GitHub 後由 Pages 服務（main 分支 `/docs` 目錄，自訂網域設定在 `docs/CNAME`）。
-
-### 伺服器版
+## 執行
 
 ```bash
 npm install
@@ -46,6 +24,37 @@ npm start
 ```
 
 打開 http://localhost:3000 即可使用。開發模式（改檔自動重啟）：`npm run dev`，換埠號：`PORT=8080 npm start`。
+
+資料存在伺服器的 `data.db`（SQLite，已列入 `.gitignore`），所有裝置連同一台伺服器即共用同一份帳本；備份直接複製 `data.db` 或用網頁裡的「匯出 CSV」。
+
+## 部署到自己的伺服器
+
+```bash
+git clone https://github.com/fearnot221/split-bill.git
+cd split-bill
+npm install
+PORT=3000 npm start
+```
+
+建議用 systemd 常駐（`/etc/systemd/system/split-bill.service`）：
+
+```ini
+[Unit]
+Description=split-bill
+After=network.target
+
+[Service]
+WorkingDirectory=/opt/split-bill
+ExecStart=/usr/bin/node server.js
+Environment=PORT=3000
+Restart=always
+User=www-data
+
+[Install]
+WantedBy=multi-user.target
+```
+
+對外可用 Cloudflare Tunnel（`cloudflared tunnel --url http://localhost:3000` 綁 `bill.fearnot.tw`）或反向代理（Nginx/Caddy）＋ DNS A 記錄。注意：App 本身沒有登入機制，公開到網際網路前建議加一層保護（Cloudflare Access、basic auth 或僅限內網/VPN）。
 
 ## 技術架構
 

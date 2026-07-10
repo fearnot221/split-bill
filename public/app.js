@@ -67,8 +67,6 @@ function toast(msg) {
 }
 
 async function api(url, options = {}) {
-  // 靜態版（GitHub Pages）由 local-store.js 提供資料層
-  if (window.__localApi) return window.__localApi(url, options);
   const res = await fetch(url, {
     headers: { 'Content-Type': 'application/json' },
     ...options,
@@ -383,7 +381,6 @@ $('#stats-month').addEventListener('change', (ev) => {
   renderStats();
 });
 $('#btn-export').addEventListener('click', () => {
-  if (window.__localExport) return window.__localExport();
   location.href = `/api/groups/${state.groupId}/export`;
 });
 
@@ -596,10 +593,7 @@ $('#form-expense').addEventListener('submit', async (ev) => {
     state.groupId = me.groupId;
     state.memberId = me.memberId;
     await refresh();
-    // 靜態版資料都在本機，不需輪詢
-    if (!window.__localApi) {
-      state.pollTimer = setInterval(() => refresh().catch(() => {}), 15000);
-    }
+    state.pollTimer = setInterval(() => refresh().catch(() => {}), 15000);
   } catch (e) {
     toast(e.message);
   }
