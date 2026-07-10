@@ -72,6 +72,9 @@ if (!expenseCols.some((c) => c.name === 'deleted_at')) {
 if (!expenseCols.some((c) => c.name === 'receipt')) {
   db.exec('ALTER TABLE expenses ADD COLUMN receipt TEXT');
 }
+if (!expenseCols.some((c) => c.name === 'note')) {
+  db.exec('ALTER TABLE expenses ADD COLUMN note TEXT');
+}
 
 // 幫沒有類別的帳本種入預設類別（新帳本與既有資料庫遷移共用）
 const DEFAULT_CATEGORIES = [

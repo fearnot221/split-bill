@@ -156,7 +156,7 @@ label {
   margin-bottom: 14px;
 }
 
-input:not([type="checkbox"]), select {
+input:not([type="checkbox"]), select, textarea {
   display: block;
   width: 100%;
   margin-top: 6px;
@@ -173,7 +173,8 @@ input:not([type="checkbox"]), select {
   appearance: none;
   -webkit-appearance: none;
 }
-input:not([type="checkbox"]):focus, select:focus { border-color: var(--rule-strong); }
+textarea { resize: vertical; line-height: 1.5; }
+input:not([type="checkbox"]):focus, select:focus, textarea:focus { border-color: var(--rule-strong); }
 input::placeholder { color: var(--sub); opacity: .6; }
 input[type="number"], input[type="date"] { font-family: var(--mono); font-size: .95rem; }
 select {
@@ -325,6 +326,15 @@ select {
   margin-left: 6px;
 }
 .clip-ico svg { width: 12px; height: 12px; }
+
+.expense-note {
+  font-size: .74rem;
+  color: var(--sub);
+  opacity: .85;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .expense-del {
   background: none;
   border: none;

@@ -140,11 +140,12 @@ app.get('/api/groups/:id/export', (req, res) => {
   if (!data) return res.status(404).json({ error: '找不到帳本' });
   const nameOf = (id) => data.members.find((m) => m.id === id)?.name || '?';
   const esc = (v) => `"${String(v).replace(/"/g, '""')}"`;
-  const rows = [['日期', '說明', '分類', '付款人', '金額', '分攤明細']];
+  const rows = [['日期', '說明', '分類', '付款人', '金額', '分攤明細', '備註']];
   for (const e of data.expenses) {
     rows.push([
       e.expense_date, e.description, e.category, nameOf(e.payer_id), e.amount,
       e.splits.map((s) => `${nameOf(s.member_id)}:${s.amount}`).join('; '),
+      e.note || '',
     ]);
   }
   const csv = '\uFEFF' + rows.map((r) => r.map(esc).join(',')).join('\r\n');
@@ -228,8 +229,10 @@ app.delete('/api/groups/:id/categories/:categoryId', (req, res) => {
 
 // 新增支出
 app.post('/api/groups/:id/expenses', (req, res) => {
-  const { payerId, description, amount, category, expenseDate, splits } = req.body;
+  const { payerId, description, amount, category, expenseDate, splits, note } = req.body;
   const groupId = req.params.id;
+  const noteText = (note || '').trim();
+  if (noteText.length > 500) return res.status(400).json({ error: '備註最多 500 字' });
 
   const amt = Number(amount);
   if (!description?.trim()) return res.status(400).json({ error: '請填寫項目說明' });
@@ -258,11 +261,11 @@ app.post('/api/groups/:id/expenses', (req, res) => {
   const expenseId = uid();
   db.transaction(() => {
     db.prepare(
-      `INSERT INTO expenses (id, group_id, payer_id, description, amount, category, expense_date)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO expenses (id, group_id, payer_id, description, amount, category, expense_date, note)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       expenseId, groupId, payerId, description.trim(), round2(amt),
-      catName, expenseDate || new Date().toISOString().slice(0, 10)
+      catName, expenseDate || new Date().toISOString().slice(0, 10), noteText || null
     );
     const ins = db.prepare(
       'INSERT INTO expense_splits (expense_id, member_id, amount) VALUES (?, ?, ?)'
@@ -276,9 +279,11 @@ app.post('/api/groups/:id/expenses', (req, res) => {
 
 // 編輯支出
 app.put('/api/groups/:id/expenses/:expenseId', (req, res) => {
-  const { payerId, description, amount, category, expenseDate, splits } = req.body;
+  const { payerId, description, amount, category, expenseDate, splits, note } = req.body;
   const groupId = req.params.id;
   const expenseId = req.params.expenseId;
+  const noteText = (note || '').trim();
+  if (noteText.length > 500) return res.status(400).json({ error: '備註最多 500 字' });
 
   const existing = db
     .prepare('SELECT id FROM expenses WHERE id = ? AND group_id = ? AND deleted_at IS NULL')
@@ -311,11 +316,11 @@ app.put('/api/groups/:id/expenses/:expenseId', (req, res) => {
 
   db.transaction(() => {
     db.prepare(
-      `UPDATE expenses SET payer_id = ?, description = ?, amount = ?, category = ?, expense_date = ?
-       WHERE id = ?`
+      `UPDATE expenses SET payer_id = ?, description = ?, amount = ?, category = ?, expense_date = ?,
+       note = ? WHERE id = ?`
     ).run(
       payerId, description.trim(), round2(amt), catName,
-      expenseDate || new Date().toISOString().slice(0, 10), expenseId
+      expenseDate || new Date().toISOString().slice(0, 10), noteText || null, expenseId
     );
     db.prepare('DELETE FROM expense_splits WHERE expense_id = ?').run(expenseId);
     const ins = db.prepare(

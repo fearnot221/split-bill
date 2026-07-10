@@ -172,6 +172,7 @@ function renderTrash() {
           <span class="member-tag">${escapeHtml(e.category)}</span></div>
         <div class="expense-meta">${e.expense_date}｜${escapeHtml(e.payer_name)} 付款 ${fmt(e.amount)}｜
           分攤：${escapeHtml(e.split_names.join('、'))}｜刪於 ${fmtTime(e.deleted_at)}</div>
+        ${e.note ? `<div class="expense-note">${escapeHtml(e.note)}</div>` : ''}
       </div>
       <span class="admin-actions">
         <button type="button" class="pill-btn act-restore">復原</button>

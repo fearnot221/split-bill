@@ -140,6 +140,7 @@ function matchesFilter(e) {
   if (!q) return true;
   const haystack = [
     e.description,
+    e.note || '',
     memberName(e.payer_id),
     ...e.splits.map((s) => memberName(s.member_id)),
   ].join(' ').toLowerCase();
@@ -156,6 +157,7 @@ function expenseItemHtml(e) {
       <div class="expense-info">
         <div class="expense-desc">${escapeHtml(e.description)}${e.receipt ? `<span class="clip-ico" title="附有單據">${ICONS.clip}</span>` : ''}</div>
         <div class="expense-meta">${meta}</div>
+        ${e.note ? `<div class="expense-note">${escapeHtml(e.note)}</div>` : ''}
       </div>
       <span class="expense-amount">${fmt(e.amount)}</span>
       <button class="expense-del" title="刪除">${ICONS.trash}</button>
@@ -416,6 +418,7 @@ function openExpenseModal(expense = null) {
   $('#exp-desc').value = expense?.description || '';
   $('#exp-amount').value = expense ? expense.amount : '';
   $('#exp-date').value = expense?.expense_date || todayLocal();
+  $('#exp-note').value = expense?.note || '';
 
   renderModalCats(expense?.category || state.data.categories[0]?.name);
 
@@ -619,6 +622,7 @@ $('#form-expense').addEventListener('submit', async (ev) => {
     amount,
     category: $('#exp-categories .chip.active')?.dataset.cat || '其他',
     expenseDate: $('#exp-date').value,
+    note: $('#exp-note').value,
     splits,
   };
 
