@@ -44,6 +44,15 @@ CREATE INDEX IF NOT EXISTS idx_members_group ON members(group_id);
 CREATE INDEX IF NOT EXISTS idx_expenses_group ON expenses(group_id);
 CREATE INDEX IF NOT EXISTS idx_splits_expense ON expense_splits(expense_id);
 
+CREATE TABLE IF NOT EXISTS categories (
+  id TEXT PRIMARY KEY,
+  group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  icon TEXT NOT NULL DEFAULT 'tag',
+  sort INTEGER NOT NULL DEFAULT 0,
+  UNIQUE (group_id, name)
+);
+
 CREATE TABLE IF NOT EXISTS admin_config (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
@@ -60,5 +69,20 @@ const expenseCols = db.prepare('PRAGMA table_info(expenses)').all();
 if (!expenseCols.some((c) => c.name === 'deleted_at')) {
   db.exec('ALTER TABLE expenses ADD COLUMN deleted_at TEXT');
 }
+
+// 幫沒有類別的帳本種入預設類別（新帳本與既有資料庫遷移共用）
+const DEFAULT_CATEGORIES = [
+  ['餐飲', 'food'], ['交通', 'transport'], ['住宿', 'lodging'],
+  ['購物', 'shopping'], ['娛樂', 'fun'], ['其他', 'other'],
+];
+db.seedCategories = (groupId) => {
+  const has = db.prepare('SELECT 1 FROM categories WHERE group_id = ? LIMIT 1').get(groupId);
+  if (has) return;
+  const ins = db.prepare('INSERT INTO categories (id, group_id, name, icon, sort) VALUES (?, ?, ?, ?, ?)');
+  DEFAULT_CATEGORIES.forEach(([name, icon], i) => {
+    ins.run(require('crypto').randomUUID(), groupId, name, icon, i);
+  });
+};
+for (const g of db.prepare('SELECT id FROM groups').all()) db.seedCategories(g.id);
 
 module.exports = db;

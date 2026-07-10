@@ -3,12 +3,6 @@ const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
 
 const TRANSFER_CAT = '還款';
-const SPEND_CATS = ['餐飲', '交通', '住宿', '購物', '娛樂', '其他'];
-
-const CATEGORY_KEYS = {
-  '餐飲': 'food', '交通': 'transport', '住宿': 'lodging',
-  '購物': 'shopping', '娛樂': 'fun', '其他': 'other', '還款': 'transfer',
-};
 
 const svgWrap = (paths, sw = 1.8) =>
   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
@@ -24,11 +18,23 @@ const ICONS = {
   trash: svgWrap('<path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/>'),
   x: svgWrap('<path d="M18 6 6 18"/><path d="m6 6 12 12"/>'),
   check: svgWrap('<path d="M20 6 9 17l-5-5"/>', 2.2),
+  tag: svgWrap('<path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"/><circle cx="7.5" cy="7.5" r=".5" fill="currentColor"/>'),
 };
 
+// 類別的圖示與顏色：預設類別有專屬圖示；自訂類別用 tag 圖示、依名稱雜湊配色
+function catMeta(cat) {
+  if (cat === TRANSFER_CAT) return { icon: 'transfer', color: 'cat-transfer' };
+  const c = state.data?.categories?.find((x) => x.name === cat);
+  const icon = c?.icon || 'other';
+  if (icon !== 'tag') return { icon, color: `cat-${icon}` };
+  let h = 0;
+  for (const ch of cat) h = (h * 31 + ch.codePointAt(0)) % 6;
+  return { icon: 'tag', color: `cat-h${h}` };
+}
+
 function catIcon(cat, cls = 'expense-icon') {
-  const key = CATEGORY_KEYS[cat] || 'other';
-  return `<span class="${cls} cat-${key}">${ICONS[key]}</span>`;
+  const m = catMeta(cat);
+  return `<span class="${cls} ${m.color}">${ICONS[m.icon] || ICONS.other}</span>`;
 }
 
 let state = {
@@ -117,6 +123,7 @@ function renderAll() {
   balEl.textContent = fmt(myBal);
   balEl.className = 'stat-value ' + (myBal > 0.01 ? 'positive' : myBal < -0.01 ? 'negative' : '');
 
+  renderFilterChips();
   renderExpenses();
   renderBalances(members, balances);
   renderSettlements(settlements);
@@ -342,15 +349,49 @@ function renderMembers(members) {
   });
 }
 
-/* ===== 分類 chips（篩選列與 Modal 共用同一套產生邏輯） ===== */
-const chipHtml = (cat) =>
-  `<button type="button" class="chip" data-cat="${cat}"><span>${cat}</span></button>`;
+/* ===== 分類 chips（清單來自帳本資料，可自訂新增） ===== */
+const chipHtml = (cat, active) =>
+  `<button type="button" class="chip${active ? ' active' : ''}" data-cat="${escapeHtml(cat)}"><span>${escapeHtml(cat)}</span></button>`;
 
-$('#filter-cats').innerHTML =
-  '<button type="button" class="chip active" data-cat="全部"><span>全部</span></button>'
-  + [...SPEND_CATS, TRANSFER_CAT].map(chipHtml).join('');
+function renderFilterChips() {
+  const names = ['全部', ...state.data.categories.map((c) => c.name), TRANSFER_CAT];
+  const row = $('#filter-cats');
+  if (row.dataset.cats === names.join('|')) return; // 類別沒變就不重建
+  row.dataset.cats = names.join('|');
+  if (!names.includes(state.filterCat)) state.filterCat = '全部';
+  row.innerHTML = names.map((c) => chipHtml(c, c === state.filterCat)).join('');
+  row.querySelectorAll('.chip').forEach((chip) => {
+    chip.addEventListener('click', () => {
+      row.querySelectorAll('.chip').forEach((c) => c.classList.toggle('active', c === chip));
+      state.filterCat = chip.dataset.cat;
+      renderExpenses();
+    });
+  });
+}
 
-$('#exp-categories').innerHTML = SPEND_CATS.map(chipHtml).join('');
+function renderModalCats(selected) {
+  const row = $('#exp-categories');
+  row.innerHTML = state.data.categories.map((c) => chipHtml(c.name, c.name === selected)).join('')
+    + '<button type="button" class="chip chip-add"><span>＋ 新類別</span></button>';
+  row.querySelectorAll('.chip:not(.chip-add)').forEach((chip) => {
+    chip.addEventListener('click', () => {
+      row.querySelectorAll('.chip:not(.chip-add)').forEach((c) => c.classList.toggle('active', c === chip));
+    });
+  });
+  row.querySelector('.chip-add').addEventListener('click', async () => {
+    const name = prompt('新類別名稱（最多 10 字）：')?.trim();
+    if (!name) return;
+    try {
+      await api(`/api/groups/${state.groupId}/categories`, {
+        method: 'POST',
+        body: JSON.stringify({ name }),
+      });
+      await refresh();
+      renderModalCats(name); // 重建並選中新類別
+      toast('類別已新增');
+    } catch (e) { toast(e.message); }
+  });
+}
 
 /* ===== 分頁切換 ===== */
 $$('.tab-btn').forEach((btn) => {
@@ -366,13 +407,6 @@ $$('.tab-btn').forEach((btn) => {
 $('#filter-text').addEventListener('input', (ev) => {
   state.filterText = ev.target.value;
   renderExpenses();
-});
-$$('#filter-cats .chip').forEach((chip) => {
-  chip.addEventListener('click', () => {
-    $$('#filter-cats .chip').forEach((c) => c.classList.toggle('active', c === chip));
-    state.filterCat = chip.dataset.cat;
-    renderExpenses();
-  });
 });
 
 /* ===== 統計操作 ===== */
@@ -434,8 +468,7 @@ function openExpenseModal(expense = null) {
   $('#exp-amount').value = expense ? expense.amount : '';
   $('#exp-date').value = expense?.expense_date || new Date().toISOString().slice(0, 10);
 
-  const cat = expense?.category || '餐飲';
-  $$('#exp-categories .chip').forEach((c) => c.classList.toggle('active', c.dataset.cat === cat));
+  renderModalCats(expense?.category || state.data.categories[0]?.name);
 
   $('#exp-payer').innerHTML = members.map((m) =>
     `<option value="${m.id}">${escapeHtml(m.name)}</option>`).join('');
@@ -523,12 +556,6 @@ function updateSplitPreview() {
 $('#exp-amount').addEventListener('input', updateSplitPreview);
 $('#split-equal').addEventListener('click', () => setSplitMode('equal'));
 $('#split-custom').addEventListener('click', () => setSplitMode('custom'));
-
-$$('#exp-categories .chip').forEach((chip) => {
-  chip.addEventListener('click', () => {
-    $$('#exp-categories .chip').forEach((c) => c.classList.toggle('active', c === chip));
-  });
-});
 
 $('#btn-add-expense').addEventListener('click', () => openExpenseModal());
 $('#btn-close-modal').addEventListener('click', closeExpenseModal);

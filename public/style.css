@@ -237,14 +237,24 @@ select {
 .cat-other { color: #7d786d; }
 .cat-transfer { color: var(--sub); }
 
+/* 自訂類別依名稱雜湊輪用同一套色盤 */
+.cat-h0 { color: #8a6b3c; }
+.cat-h1 { color: #4e7a96; }
+.cat-h2 { color: #6f5f96; }
+.cat-h3 { color: #a05c6b; }
+.cat-h4 { color: #5d8256; }
+.cat-h5 { color: #7d786d; }
+
 @media (prefers-color-scheme: dark) {
-  .cat-food { color: #c9a86b; }
-  .cat-transport { color: #85b0c9; }
-  .cat-lodging { color: #a99ad1; }
-  .cat-shopping { color: #cf8d9c; }
-  .cat-fun { color: #93bd85; }
-  .cat-other { color: #a19b8d; }
+  .cat-food, .cat-h0 { color: #c9a86b; }
+  .cat-transport, .cat-h1 { color: #85b0c9; }
+  .cat-lodging, .cat-h2 { color: #a99ad1; }
+  .cat-shopping, .cat-h3 { color: #cf8d9c; }
+  .cat-fun, .cat-h4 { color: #93bd85; }
+  .cat-other, .cat-h5 { color: #a19b8d; }
 }
+
+.chip-add { border: 1px dashed var(--rule-strong); }
 
 /* ===== 支出列表（帳簿分欄線） ===== */
 .expense-list { list-style: none; }

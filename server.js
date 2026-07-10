@@ -79,7 +79,17 @@ function getGroupData(groupId) {
     expenses.reduce((sum, e) => (e.category === TRANSFER_CATEGORY ? sum : sum + e.amount), 0)
   );
 
-  return { group, members, expenses, balances, settlements, total };
+  const categories = db
+    .prepare('SELECT id, name, icon FROM categories WHERE group_id = ? ORDER BY sort, rowid')
+    .all(groupId);
+
+  return { group, members, expenses, balances, settlements, total, categories };
+}
+
+// 支出的類別必須存在（還款為系統保留類別）
+function isValidCategory(groupId, name) {
+  if (name === TRANSFER_CATEGORY) return true;
+  return !!db.prepare('SELECT 1 FROM categories WHERE group_id = ? AND name = ?').get(groupId, name);
 }
 
 // 個人模式：取得（或自動建立）預設帳本
@@ -93,6 +103,7 @@ app.get('/api/me', (req, res) => {
         .run(groupId, '我的帳本', genCode());
       db.prepare('INSERT INTO members (id, group_id, name) VALUES (?, ?, ?)')
         .run(memberId, groupId, '我');
+      db.seedCategories(groupId);
     })();
     group = db.prepare('SELECT * FROM groups WHERE id = ?').get(groupId);
   }
@@ -168,6 +179,43 @@ app.delete('/api/groups/:id/members/:memberId', (req, res) => {
   res.json({ ok: true });
 });
 
+// 新增類別
+app.post('/api/groups/:id/categories', (req, res) => {
+  const name = req.body.name?.trim();
+  const groupId = req.params.id;
+  if (!name) return res.status(400).json({ error: '請填寫類別名稱' });
+  if (name.length > 10) return res.status(400).json({ error: '類別名稱最多 10 字' });
+  if (name === TRANSFER_CATEGORY || name === '全部') {
+    return res.status(400).json({ error: `「${name}」為系統保留名稱` });
+  }
+  const group = db.prepare('SELECT id FROM groups WHERE id = ?').get(groupId);
+  if (!group) return res.status(404).json({ error: '找不到帳本' });
+  const dup = db.prepare('SELECT 1 FROM categories WHERE group_id = ? AND name = ?').get(groupId, name);
+  if (dup) return res.status(409).json({ error: '已有同名類別' });
+  const categoryId = uid();
+  const sort = db
+    .prepare('SELECT COALESCE(MAX(sort), 0) + 1 AS s FROM categories WHERE group_id = ?')
+    .get(groupId).s;
+  db.prepare('INSERT INTO categories (id, group_id, name, icon, sort) VALUES (?, ?, ?, ?, ?)')
+    .run(categoryId, groupId, name, 'tag', sort);
+  res.json({ categoryId });
+});
+
+// 刪除類別（使用中或備援類別不可刪）
+app.delete('/api/groups/:id/categories/:categoryId', (req, res) => {
+  const cat = db.prepare('SELECT * FROM categories WHERE id = ? AND group_id = ?')
+    .get(req.params.categoryId, req.params.id);
+  if (!cat) return res.status(404).json({ error: '找不到類別' });
+  if (cat.name === '其他') {
+    return res.status(400).json({ error: '「其他」為預設備援類別，無法刪除' });
+  }
+  const used = db.prepare('SELECT 1 FROM expenses WHERE group_id = ? AND category = ? LIMIT 1')
+    .get(req.params.id, cat.name);
+  if (used) return res.status(409).json({ error: '有支出（含回收桶）使用此類別，無法刪除' });
+  db.prepare('DELETE FROM categories WHERE id = ?').run(cat.id);
+  res.json({ ok: true });
+});
+
 // 新增支出
 app.post('/api/groups/:id/expenses', (req, res) => {
   const { payerId, description, amount, category, expenseDate, splits } = req.body;
@@ -194,6 +242,8 @@ app.post('/api/groups/:id/expenses', (req, res) => {
   if (Math.abs(splitTotal - round2(amt)) > 0.01) {
     return res.status(400).json({ error: `分攤總額 ${splitTotal} 與支出金額 ${amt} 不符` });
   }
+  const catName = category || '其他';
+  if (!isValidCategory(groupId, catName)) return res.status(400).json({ error: '類別不存在' });
 
   const expenseId = uid();
   db.transaction(() => {
@@ -202,7 +252,7 @@ app.post('/api/groups/:id/expenses', (req, res) => {
        VALUES (?, ?, ?, ?, ?, ?, ?)`
     ).run(
       expenseId, groupId, payerId, description.trim(), round2(amt),
-      category || '其他', expenseDate || new Date().toISOString().slice(0, 10)
+      catName, expenseDate || new Date().toISOString().slice(0, 10)
     );
     const ins = db.prepare(
       'INSERT INTO expense_splits (expense_id, member_id, amount) VALUES (?, ?, ?)'
@@ -246,13 +296,15 @@ app.put('/api/groups/:id/expenses/:expenseId', (req, res) => {
   if (Math.abs(splitTotal - round2(amt)) > 0.01) {
     return res.status(400).json({ error: `分攤總額 ${splitTotal} 與支出金額 ${amt} 不符` });
   }
+  const catName = category || '其他';
+  if (!isValidCategory(groupId, catName)) return res.status(400).json({ error: '類別不存在' });
 
   db.transaction(() => {
     db.prepare(
       `UPDATE expenses SET payer_id = ?, description = ?, amount = ?, category = ?, expense_date = ?
        WHERE id = ?`
     ).run(
-      payerId, description.trim(), round2(amt), category || '其他',
+      payerId, description.trim(), round2(amt), catName,
       expenseDate || new Date().toISOString().slice(0, 10), expenseId
     );
     db.prepare('DELETE FROM expense_splits WHERE expense_id = ?').run(expenseId);
@@ -409,7 +461,13 @@ app.get('/api/admin/overview', requireAdmin, (req, res) => {
     e.split_names = splitStmt.all(e.id).map((s) => nameOf.get(s.member_id) || '?');
   }
 
-  res.json({ group, members, deleted });
+  const categories = db.prepare(`
+    SELECT c.*,
+      (SELECT COUNT(*) FROM expenses e WHERE e.group_id = c.group_id AND e.category = c.name)
+        AS used_count
+    FROM categories c WHERE c.group_id = ? ORDER BY c.sort, c.rowid`).all(group.id);
+
+  res.json({ group, members, deleted, categories });
 });
 
 // 成員改名

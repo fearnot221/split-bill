@@ -45,6 +45,16 @@
         </section>
 
         <section class="card">
+          <h2>類別管理</h2>
+          <p class="hint">被支出（含回收桶）使用中的類別無法刪除；「其他」為預設備援類別。</p>
+          <ul id="admin-cats" class="member-list"></ul>
+          <form id="form-admin-add-cat" class="inline-form">
+            <input type="text" id="admin-new-cat" placeholder="新類別名稱" maxlength="10" required>
+            <button type="submit" class="btn btn-secondary btn-sm">新增</button>
+          </form>
+        </section>
+
+        <section class="card">
           <h2>回收桶</h2>
           <p class="hint">被刪除的支出會留在這裡，可復原或永久刪除。</p>
           <ul id="admin-trash" class="expense-list"></ul>
@@ -71,6 +81,6 @@
 
   <div id="toast" class="toast hidden"></div>
 
-  <script src="admin.js?v=1"></script>
+  <script src="admin.js?v=2"></script>
 </body>
 </html>

@@ -80,6 +80,7 @@ async function loadPanel() {
   $('#auth-section').classList.add('hidden');
   $('#panel').classList.remove('hidden');
   renderMembers();
+  renderCats();
   renderTrash();
 }
 
@@ -125,6 +126,33 @@ function renderMembers() {
       try {
         await api(`/api/groups/${overview.group.id}/members/${member.id}`, { method: 'DELETE' });
         toast('成員已刪除');
+        loadPanel();
+      } catch (e) { toast(e.message); }
+    });
+  });
+}
+
+function renderCats() {
+  $('#admin-cats').innerHTML = overview.categories.map((c) => `
+    <li data-id="${c.id}">
+      <span class="member-name-row">
+        ${escapeHtml(c.name)}
+        <span class="member-tag">${c.used_count} 筆支出</span>
+      </span>
+      <span class="admin-actions">
+        <button type="button" class="pill-btn danger act-cat-del"
+          ${c.used_count > 0 || c.name === '其他' ? 'disabled title="使用中或備援類別，無法刪除"' : ''}>刪除</button>
+      </span>
+    </li>`).join('');
+
+  $$('#admin-cats .act-cat-del').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const li = btn.closest('li');
+      const cat = overview.categories.find((c) => c.id === li.dataset.id);
+      if (!confirm(`確定刪除類別「${cat.name}」？`)) return;
+      try {
+        await api(`/api/groups/${overview.group.id}/categories/${cat.id}`, { method: 'DELETE' });
+        toast('類別已刪除');
         loadPanel();
       } catch (e) { toast(e.message); }
     });
@@ -183,6 +211,19 @@ $('#form-admin-add').addEventListener('submit', async (ev) => {
     });
     ev.target.reset();
     toast('成員已新增');
+    loadPanel();
+  } catch (e) { toast(e.message); }
+});
+
+$('#form-admin-add-cat').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  try {
+    await api(`/api/groups/${overview.group.id}/categories`, {
+      method: 'POST',
+      body: JSON.stringify({ name: $('#admin-new-cat').value }),
+    });
+    ev.target.reset();
+    toast('類別已新增');
     loadPanel();
   } catch (e) { toast(e.message); }
 });
