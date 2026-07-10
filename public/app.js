@@ -112,7 +112,7 @@ function renderAll() {
   const { group, members, expenses, balances, settlements, total } = state.data;
 
   $('#group-name').textContent = group.name;
-  document.title = `${group.name} — 分帳趣`;
+  document.title = `${group.name} — 分帳小工具`;
 
   // 摘要列
   const monthKey = todayLocal().slice(0, 7);
