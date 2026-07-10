@@ -64,10 +64,13 @@ CREATE TABLE IF NOT EXISTS admin_sessions (
 );
 `);
 
-// 既有資料庫補上軟刪除欄位（支出刪除改為進回收桶）
+// 既有資料庫補上軟刪除與單據欄位
 const expenseCols = db.prepare('PRAGMA table_info(expenses)').all();
 if (!expenseCols.some((c) => c.name === 'deleted_at')) {
   db.exec('ALTER TABLE expenses ADD COLUMN deleted_at TEXT');
+}
+if (!expenseCols.some((c) => c.name === 'receipt')) {
+  db.exec('ALTER TABLE expenses ADD COLUMN receipt TEXT');
 }
 
 // 幫沒有類別的帳本種入預設類別（新帳本與既有資料庫遷移共用）

@@ -6,7 +6,7 @@
   <meta name="robots" content="noindex, nofollow">
   <meta name="theme-color" content="#f5f3ee">
   <title>管理面板 — 分帳趣</title>
-  <link rel="stylesheet" href="style.css?v=7">
+  <link rel="stylesheet" href="style.css?v=8">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%2344705a'/><text x='50' y='72' font-size='60' text-anchor='middle' fill='white' font-family='Helvetica,Arial,sans-serif' font-weight='bold'>$</text></svg>">
 </head>
 <body>
@@ -59,6 +59,15 @@
           <p class="hint">被刪除的支出會留在這裡，可復原或永久刪除。</p>
           <ul id="admin-trash" class="expense-list"></ul>
           <p id="trash-empty" class="empty-hint hidden">回收桶是空的</p>
+          <button type="button" id="btn-clear-trash" class="btn btn-ghost btn-sm danger hidden">清空回收桶</button>
+        </section>
+
+        <section class="card">
+          <h2>帳本設定</h2>
+          <form id="form-rename" class="inline-form">
+            <input type="text" id="ledger-name" placeholder="帳本名稱" maxlength="30" required>
+            <button type="submit" class="btn btn-secondary btn-sm">儲存</button>
+          </form>
         </section>
 
         <section class="card">
@@ -81,6 +90,6 @@
 
   <div id="toast" class="toast hidden"></div>
 
-  <script src="admin.js?v=2"></script>
+  <script src="admin.js?v=3"></script>
 </body>
 </html>

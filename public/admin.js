@@ -79,6 +79,8 @@ async function loadPanel() {
   overview = await api('/api/admin/overview');
   $('#auth-section').classList.add('hidden');
   $('#panel').classList.remove('hidden');
+  const nameInput = $('#ledger-name');
+  if (document.activeElement !== nameInput) nameInput.value = overview.group.name;
   renderMembers();
   renderCats();
   renderTrash();
@@ -162,6 +164,7 @@ function renderCats() {
 function renderTrash() {
   const list = $('#admin-trash');
   $('#trash-empty').classList.toggle('hidden', overview.deleted.length > 0);
+  $('#btn-clear-trash').classList.toggle('hidden', overview.deleted.length === 0);
   list.innerHTML = overview.deleted.map((e) => `
     <li class="expense-item transfer" data-id="${e.id}">
       <div class="expense-info">
@@ -224,6 +227,27 @@ $('#form-admin-add-cat').addEventListener('submit', async (ev) => {
     });
     ev.target.reset();
     toast('類別已新增');
+    loadPanel();
+  } catch (e) { toast(e.message); }
+});
+
+$('#btn-clear-trash').addEventListener('click', async () => {
+  if (!confirm(`清空回收桶？${overview.deleted.length} 筆紀錄將永久刪除，無法復原。`)) return;
+  try {
+    const r = await api('/api/admin/trash', { method: 'DELETE' });
+    toast(`已永久刪除 ${r.deleted} 筆`);
+    loadPanel();
+  } catch (e) { toast(e.message); }
+});
+
+$('#form-rename').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  try {
+    await api(`/api/groups/${overview.group.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ name: $('#ledger-name').value }),
+    });
+    toast('帳本名稱已更新');
     loadPanel();
   } catch (e) { toast(e.message); }
 });

@@ -314,8 +314,17 @@ select {
   font-size: .95rem;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+  color: var(--red);
 }
-.expense-item.transfer .expense-amount { color: var(--sub); }
+.expense-item.transfer .expense-amount { color: var(--green); }
+
+.clip-ico {
+  display: inline-flex;
+  color: var(--sub);
+  vertical-align: -1px;
+  margin-left: 6px;
+}
+.clip-ico svg { width: 12px; height: 12px; }
 .expense-del {
   background: none;
   border: none;
@@ -663,6 +672,28 @@ select {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
+
+/* ===== 單據照片 ===== */
+.receipt-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.receipt-thumb {
+  width: 62px;
+  height: 62px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--rule);
+  flex-shrink: 0;
+}
+.receipt-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.btn.danger { color: var(--red); }
+.btn-ghost.danger { border-color: var(--red); }
+.btn-ghost.danger:hover { color: var(--red); border-color: var(--red); background: var(--fill); }
+#btn-delete-expense { margin-top: 10px; }
 
 /* ===== 管理面板 ===== */
 .admin-actions {

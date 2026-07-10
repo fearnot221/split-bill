@@ -19,6 +19,7 @@ const ICONS = {
   x: svgWrap('<path d="M18 6 6 18"/><path d="m6 6 12 12"/>'),
   check: svgWrap('<path d="M20 6 9 17l-5-5"/>', 2.2),
   tag: svgWrap('<path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"/><circle cx="7.5" cy="7.5" r=".5" fill="currentColor"/>'),
+  clip: svgWrap('<path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/>'),
 };
 
 // 類別的圖示與顏色：預設類別有專屬圖示；自訂類別用 tag 圖示、依名稱雜湊配色
@@ -55,6 +56,12 @@ function fmt(n) {
     ? abs.toLocaleString()
     : abs.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   return (n < 0 ? '-$' : '$') + s;
+}
+
+// 以本地時區取得今天日期（toISOString 是 UTC，凌晨會差一天）
+function todayLocal() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 function fmtDate(iso) {
@@ -107,12 +114,8 @@ function renderAll() {
   $('#group-name').textContent = group.name;
   document.title = `${group.name} — 分帳趣`;
 
-  // 帳本設定的名稱欄位（輸入中不覆蓋）
-  const nameInput = $('#ledger-name');
-  if (document.activeElement !== nameInput) nameInput.value = group.name;
-
   // 摘要列
-  const monthKey = new Date().toISOString().slice(0, 7);
+  const monthKey = todayLocal().slice(0, 7);
   const monthTotal = expenses.reduce(
     (sum, e) => (!isTransfer(e) && e.expense_date.startsWith(monthKey) ? sum + e.amount : sum), 0);
   $('#month-total').textContent = fmt(monthTotal);
@@ -128,7 +131,6 @@ function renderAll() {
   renderBalances(members, balances);
   renderSettlements(settlements);
   renderStats();
-  renderMembers(members);
 }
 
 /* ===== 支出列表（含搜尋 / 分類篩選） ===== */
@@ -152,7 +154,7 @@ function expenseItemHtml(e) {
     <li class="expense-item${isTransfer(e) ? ' transfer' : ''}" data-id="${e.id}">
       ${catIcon(e.category)}
       <div class="expense-info">
-        <div class="expense-desc">${escapeHtml(e.description)}</div>
+        <div class="expense-desc">${escapeHtml(e.description)}${e.receipt ? `<span class="clip-ico" title="附有單據">${ICONS.clip}</span>` : ''}</div>
         <div class="expense-meta">${meta}</div>
       </div>
       <span class="expense-amount">${fmt(e.amount)}</span>
@@ -248,7 +250,7 @@ function renderSettlements(settlements) {
             description: `還款給 ${toName}`,
             amount: s.amount,
             category: TRANSFER_CAT,
-            expenseDate: new Date().toISOString().slice(0, 10),
+            expenseDate: todayLocal(),
             splits: [{ memberId: s.to, amount: s.amount }],
           }),
         });
@@ -324,31 +326,6 @@ function renderStats() {
   }).join('');
 }
 
-/* ===== 成員 ===== */
-function renderMembers(members) {
-  $('#member-list').innerHTML = members.map((m) => `
-    <li data-id="${m.id}">
-      <span class="member-name-row">
-        ${escapeHtml(m.name)}
-        ${m.id === state.memberId ? '<span class="member-tag">我</span>' : ''}
-      </span>
-      ${m.id === state.memberId ? '' : `<button class="member-del" title="刪除成員">${ICONS.x}</button>`}
-    </li>`).join('');
-
-  $$('#member-list .member-del').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const li = btn.closest('li');
-      const name = memberName(li.dataset.id);
-      if (!confirm(`確定刪除成員「${name}」？（有帳務紀錄的成員無法刪除）`)) return;
-      try {
-        await api(`/api/groups/${state.groupId}/members/${li.dataset.id}`, { method: 'DELETE' });
-        toast('成員已刪除');
-        refresh();
-      } catch (e) { toast(e.message); }
-    });
-  });
-}
-
 /* ===== 分類 chips（清單來自帳本資料，可自訂新增） ===== */
 const chipHtml = (cat, active) =>
   `<button type="button" class="chip${active ? ' active' : ''}" data-cat="${escapeHtml(cat)}"><span>${escapeHtml(cat)}</span></button>`;
@@ -418,34 +395,6 @@ $('#btn-export').addEventListener('click', () => {
   location.href = `/api/groups/${state.groupId}/export`;
 });
 
-/* ===== 成員 / 帳本設定 ===== */
-$('#form-add-member').addEventListener('submit', async (ev) => {
-  ev.preventDefault();
-  const name = $('#new-member-name').value;
-  try {
-    await api(`/api/groups/${state.groupId}/members`, {
-      method: 'POST',
-      body: JSON.stringify({ name }),
-    });
-    ev.target.reset();
-    toast('成員已新增');
-    refresh();
-  } catch (e) { toast(e.message); }
-});
-
-$('#form-rename').addEventListener('submit', async (ev) => {
-  ev.preventDefault();
-  const name = $('#ledger-name').value;
-  try {
-    await api(`/api/groups/${state.groupId}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ name }),
-    });
-    toast('帳本名稱已更新');
-    refresh();
-  } catch (e) { toast(e.message); }
-});
-
 /* ===== 新增 / 編輯支出 Modal ===== */
 let splitMode = 'equal';
 
@@ -466,7 +415,7 @@ function openExpenseModal(expense = null) {
   $('#form-expense').reset();
   $('#exp-desc').value = expense?.description || '';
   $('#exp-amount').value = expense ? expense.amount : '';
-  $('#exp-date').value = expense?.expense_date || new Date().toISOString().slice(0, 10);
+  $('#exp-date').value = expense?.expense_date || todayLocal();
 
   renderModalCats(expense?.category || state.data.categories[0]?.name);
 
@@ -499,6 +448,12 @@ function openExpenseModal(expense = null) {
   }
   setSplitMode(mode);
 
+  // 單據與刪除鈕
+  receiptState = { pending: null, existing: expense?.receipt || null, removed: false };
+  $('#exp-receipt-file').value = '';
+  renderReceiptUI();
+  $('#btn-delete-expense').classList.toggle('hidden', !expense);
+
   $('#modal-expense').classList.remove('hidden');
   setTimeout(() => $('#exp-desc').focus(), 50);
 }
@@ -507,6 +462,79 @@ function closeExpenseModal() {
   $('#modal-expense').classList.add('hidden');
   state.editingId = null;
 }
+
+/* ===== 單據照片 ===== */
+let receiptState = { pending: null, existing: null, removed: false };
+
+function renderReceiptUI() {
+  const thumb = $('#receipt-thumb');
+  const hasImage = !!receiptState.pending || (!!receiptState.existing && !receiptState.removed);
+  thumb.classList.toggle('hidden', !hasImage);
+  if (receiptState.pending) thumb.src = receiptState.pending;
+  else if (receiptState.existing && !receiptState.removed) thumb.src = `/uploads/${receiptState.existing}`;
+  else thumb.removeAttribute('src');
+  $('#btn-receipt-pick').textContent = hasImage ? '更換單據' : '附上單據照片';
+  $('#btn-receipt-view').classList.toggle('hidden',
+    !(receiptState.existing && !receiptState.removed && !receiptState.pending));
+  $('#btn-receipt-remove').classList.toggle('hidden', !hasImage);
+}
+
+// 縮到最長邊 1600px 的 JPEG，避免上傳原始大圖
+function compressImage(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const scale = Math.min(1, 1600 / Math.max(img.width, img.height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
+      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+      resolve(canvas.toDataURL('image/jpeg', 0.82));
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('無法讀取這張圖片'));
+    };
+    img.src = url;
+  });
+}
+
+$('#btn-receipt-pick').addEventListener('click', () => $('#exp-receipt-file').click());
+
+$('#exp-receipt-file').addEventListener('change', async (ev) => {
+  const file = ev.target.files[0];
+  if (!file) return;
+  try {
+    receiptState.pending = await compressImage(file);
+    receiptState.removed = false;
+    renderReceiptUI();
+  } catch (e) { toast(e.message); }
+  ev.target.value = '';
+});
+
+$('#btn-receipt-view').addEventListener('click', () => {
+  if (receiptState.existing) window.open(`/uploads/${receiptState.existing}`, '_blank');
+});
+
+$('#btn-receipt-remove').addEventListener('click', () => {
+  receiptState.pending = null;
+  receiptState.removed = !!receiptState.existing;
+  renderReceiptUI();
+});
+
+$('#btn-delete-expense').addEventListener('click', async () => {
+  if (!state.editingId) return;
+  const exp = state.data.expenses.find((e) => e.id === state.editingId);
+  if (!confirm(`確定刪除「${exp?.description ?? '這筆支出'}」？`)) return;
+  try {
+    await api(`/api/groups/${state.groupId}/expenses/${state.editingId}`, { method: 'DELETE' });
+    closeExpenseModal();
+    toast('已刪除');
+    refresh();
+  } catch (e) { toast(e.message); }
+});
 
 // 均分並把餘數分給前面的人（避免 0.01 誤差）
 function equalSplit(amount, n) {
@@ -595,19 +623,31 @@ $('#form-expense').addEventListener('submit', async (ev) => {
   };
 
   try {
-    if (state.editingId) {
-      await api(`/api/groups/${state.groupId}/expenses/${state.editingId}`, {
+    const isEdit = !!state.editingId;
+    let expenseId = state.editingId;
+    if (isEdit) {
+      await api(`/api/groups/${state.groupId}/expenses/${expenseId}`, {
         method: 'PUT',
         body: JSON.stringify(payload),
       });
-      toast('支出已更新');
     } else {
-      await api(`/api/groups/${state.groupId}/expenses`, {
+      expenseId = (await api(`/api/groups/${state.groupId}/expenses`, {
         method: 'POST',
         body: JSON.stringify(payload),
-      });
-      toast('支出已新增');
+      })).expenseId;
     }
+
+    // 單據：有新照片就上傳（會自動替換舊的），被移除就刪掉
+    if (receiptState.pending) {
+      await api(`/api/groups/${state.groupId}/expenses/${expenseId}/receipt`, {
+        method: 'POST',
+        body: JSON.stringify({ dataUrl: receiptState.pending }),
+      });
+    } else if (receiptState.removed && receiptState.existing) {
+      await api(`/api/groups/${state.groupId}/expenses/${expenseId}/receipt`, { method: 'DELETE' });
+    }
+
+    toast(isEdit ? '支出已更新' : '支出已新增');
     closeExpenseModal();
     refresh();
   } catch (e) { toast(e.message); }

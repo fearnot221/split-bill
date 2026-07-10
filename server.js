@@ -1,13 +1,23 @@
 const express = require('express');
 const crypto = require('crypto');
 const path = require('path');
+const fs = require('fs');
 const db = require('./db');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(express.json());
+// 單據照片存於 uploads/（已列入 .gitignore）
+const UPLOAD_DIR = path.join(__dirname, 'uploads');
+fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+
+app.use(express.json({ limit: '15mb' })); // 單據以 base64 上傳
 app.use(express.static(path.join(__dirname, 'public')));
+app.use('/uploads', express.static(UPLOAD_DIR));
+
+const unlinkReceipt = (filename) => {
+  if (filename) fs.unlink(path.join(UPLOAD_DIR, filename), () => {});
+};
 
 const uid = () => crypto.randomUUID();
 
@@ -318,6 +328,36 @@ app.put('/api/groups/:id/expenses/:expenseId', (req, res) => {
   res.json({ ok: true });
 });
 
+// 上傳／替換單據照片（base64 data URL）
+app.post('/api/groups/:id/expenses/:expenseId/receipt', (req, res) => {
+  const expense = db
+    .prepare('SELECT * FROM expenses WHERE id = ? AND group_id = ? AND deleted_at IS NULL')
+    .get(req.params.expenseId, req.params.id);
+  if (!expense) return res.status(404).json({ error: '找不到這筆支出' });
+
+  const m = /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/.exec(req.body.dataUrl || '');
+  if (!m) return res.status(400).json({ error: '單據格式不正確，請上傳圖片' });
+  const buf = Buffer.from(m[2], 'base64');
+  if (buf.length > 8 * 1024 * 1024) return res.status(400).json({ error: '圖片過大（上限 8MB）' });
+
+  const filename = `${expense.id}.${m[1] === 'jpeg' ? 'jpg' : m[1]}`;
+  if (expense.receipt && expense.receipt !== filename) unlinkReceipt(expense.receipt);
+  fs.writeFileSync(path.join(UPLOAD_DIR, filename), buf);
+  db.prepare('UPDATE expenses SET receipt = ? WHERE id = ?').run(filename, expense.id);
+  res.json({ receipt: filename });
+});
+
+// 移除單據照片
+app.delete('/api/groups/:id/expenses/:expenseId/receipt', (req, res) => {
+  const expense = db
+    .prepare('SELECT * FROM expenses WHERE id = ? AND group_id = ?')
+    .get(req.params.expenseId, req.params.id);
+  if (!expense) return res.status(404).json({ error: '找不到這筆支出' });
+  unlinkReceipt(expense.receipt);
+  db.prepare('UPDATE expenses SET receipt = NULL WHERE id = ?').run(expense.id);
+  res.json({ ok: true });
+});
+
 // 刪除支出（軟刪除：進回收桶，可由管理面板復原）
 app.delete('/api/groups/:id/expenses/:expenseId', (req, res) => {
   const result = db
@@ -491,12 +531,23 @@ app.post('/api/admin/expenses/:expenseId/restore', requireAdmin, (req, res) => {
   res.json({ ok: true });
 });
 
-// 永久刪除（僅限已在回收桶的紀錄）
+// 永久刪除（僅限已在回收桶的紀錄，連同單據檔案）
 app.delete('/api/admin/expenses/:expenseId', requireAdmin, (req, res) => {
-  const result = db.prepare('DELETE FROM expenses WHERE id = ? AND deleted_at IS NOT NULL')
-    .run(req.params.expenseId);
-  if (result.changes === 0) return res.status(404).json({ error: '找不到這筆紀錄' });
+  const expense = db.prepare('SELECT receipt FROM expenses WHERE id = ? AND deleted_at IS NOT NULL')
+    .get(req.params.expenseId);
+  if (!expense) return res.status(404).json({ error: '找不到這筆紀錄' });
+  db.prepare('DELETE FROM expenses WHERE id = ?').run(req.params.expenseId);
+  unlinkReceipt(expense.receipt);
   res.json({ ok: true });
+});
+
+// 清空回收桶
+app.delete('/api/admin/trash', requireAdmin, (req, res) => {
+  const rows = db.prepare('SELECT id, receipt FROM expenses WHERE deleted_at IS NOT NULL').all();
+  const del = db.prepare('DELETE FROM expenses WHERE id = ?');
+  db.transaction(() => { for (const r of rows) del.run(r.id); })();
+  for (const r of rows) unlinkReceipt(r.receipt);
+  res.json({ deleted: rows.length });
 });
 
 app.listen(PORT, () => {
