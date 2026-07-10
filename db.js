@@ -43,6 +43,22 @@ CREATE TABLE IF NOT EXISTS expense_splits (
 CREATE INDEX IF NOT EXISTS idx_members_group ON members(group_id);
 CREATE INDEX IF NOT EXISTS idx_expenses_group ON expenses(group_id);
 CREATE INDEX IF NOT EXISTS idx_splits_expense ON expense_splits(expense_id);
+
+CREATE TABLE IF NOT EXISTS admin_config (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS admin_sessions (
+  token_hash TEXT PRIMARY KEY,
+  expires_at TEXT NOT NULL
+);
 `);
+
+// 既有資料庫補上軟刪除欄位（支出刪除改為進回收桶）
+const expenseCols = db.prepare('PRAGMA table_info(expenses)').all();
+if (!expenseCols.some((c) => c.name === 'deleted_at')) {
+  db.exec('ALTER TABLE expenses ADD COLUMN deleted_at TEXT');
+}
 
 module.exports = db;

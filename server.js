@@ -37,7 +37,8 @@ function getGroupData(groupId) {
     .all(groupId);
 
   const expenses = db
-    .prepare('SELECT * FROM expenses WHERE group_id = ? ORDER BY expense_date DESC, created_at DESC')
+    .prepare(`SELECT * FROM expenses WHERE group_id = ? AND deleted_at IS NULL
+              ORDER BY expense_date DESC, created_at DESC`)
     .all(groupId);
 
   const splitStmt = db.prepare('SELECT member_id, amount FROM expense_splits WHERE expense_id = ?');
@@ -220,7 +221,7 @@ app.put('/api/groups/:id/expenses/:expenseId', (req, res) => {
   const expenseId = req.params.expenseId;
 
   const existing = db
-    .prepare('SELECT id FROM expenses WHERE id = ? AND group_id = ?')
+    .prepare('SELECT id FROM expenses WHERE id = ? AND group_id = ? AND deleted_at IS NULL')
     .get(expenseId, groupId);
   if (!existing) return res.status(404).json({ error: '找不到這筆支出' });
 
@@ -265,12 +266,178 @@ app.put('/api/groups/:id/expenses/:expenseId', (req, res) => {
   res.json({ ok: true });
 });
 
-// 刪除支出
+// 刪除支出（軟刪除：進回收桶，可由管理面板復原）
 app.delete('/api/groups/:id/expenses/:expenseId', (req, res) => {
   const result = db
-    .prepare('DELETE FROM expenses WHERE id = ? AND group_id = ?')
+    .prepare(`UPDATE expenses SET deleted_at = datetime('now')
+              WHERE id = ? AND group_id = ? AND deleted_at IS NULL`)
     .run(req.params.expenseId, req.params.id);
   if (result.changes === 0) return res.status(404).json({ error: '找不到這筆支出' });
+  res.json({ ok: true });
+});
+
+/* ============================================
+   管理員面板（隱藏入口 /admin，密碼驗證）
+   ============================================ */
+const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
+
+const getConf = (key) =>
+  db.prepare('SELECT value FROM admin_config WHERE key = ?').get(key)?.value;
+const setConf = (key, value) =>
+  db.prepare(`INSERT INTO admin_config (key, value) VALUES (?, ?)
+              ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(key, value);
+
+function hashPassword(pw) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  return `${salt}:${crypto.scryptSync(pw, salt, 64).toString('hex')}`;
+}
+function verifyPassword(pw, stored) {
+  const [salt, hash] = stored.split(':');
+  return crypto.timingSafeEqual(Buffer.from(hash, 'hex'), crypto.scryptSync(pw, salt, 64));
+}
+
+function getCookie(req, name) {
+  for (const part of (req.headers.cookie || '').split(';')) {
+    const [k, ...v] = part.trim().split('=');
+    if (k === name) return decodeURIComponent(v.join('='));
+  }
+  return null;
+}
+
+const SESSION_DAYS = 7;
+function issueSession(res) {
+  const token = crypto.randomBytes(32).toString('hex');
+  const expires = new Date(Date.now() + SESSION_DAYS * 864e5).toISOString();
+  db.prepare('INSERT INTO admin_sessions (token_hash, expires_at) VALUES (?, ?)')
+    .run(sha256(token), expires);
+  res.setHeader('Set-Cookie',
+    `admin_session=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${SESSION_DAYS * 86400}`);
+}
+function hasSession(req) {
+  const token = getCookie(req, 'admin_session');
+  if (!token) return false;
+  const row = db.prepare('SELECT expires_at FROM admin_sessions WHERE token_hash = ?')
+    .get(sha256(token));
+  return !!row && row.expires_at > new Date().toISOString();
+}
+const requireAdmin = (req, res, next) =>
+  hasSession(req) ? next() : res.status(401).json({ error: '未登入' });
+
+// 登入防爆破：每個來源 15 分鐘內最多 8 次失敗
+const loginFails = new Map();
+function blocked(ip) {
+  const rec = loginFails.get(ip);
+  if (!rec) return false;
+  if (Date.now() > rec.resetAt) { loginFails.delete(ip); return false; }
+  return rec.count >= 8;
+}
+function recordFail(ip) {
+  const rec = loginFails.get(ip) || { count: 0, resetAt: Date.now() + 15 * 60 * 1000 };
+  rec.count++;
+  loginFails.set(ip, rec);
+}
+
+// 隱藏入口：不在主畫面提供任何連結
+app.get('/admin', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'admin.html'));
+});
+
+app.get('/api/admin/status', (req, res) => {
+  res.json({ setup: !!getConf('password'), authed: hasSession(req) });
+});
+
+// 首次使用：設定管理密碼（僅在尚未設定時允許）
+app.post('/api/admin/setup', (req, res) => {
+  if (getConf('password')) return res.status(409).json({ error: '已設定過密碼' });
+  const { password } = req.body;
+  if (!password || password.length < 6) return res.status(400).json({ error: '密碼至少 6 碼' });
+  setConf('password', hashPassword(password));
+  issueSession(res);
+  res.json({ ok: true });
+});
+
+app.post('/api/admin/login', (req, res) => {
+  if (blocked(req.ip)) return res.status(429).json({ error: '嘗試次數過多，請 15 分鐘後再試' });
+  const stored = getConf('password');
+  if (!stored) return res.status(409).json({ error: '尚未設定密碼' });
+  if (!req.body.password || !verifyPassword(String(req.body.password), stored)) {
+    recordFail(req.ip);
+    return res.status(401).json({ error: '密碼錯誤' });
+  }
+  loginFails.delete(req.ip);
+  db.prepare('DELETE FROM admin_sessions WHERE expires_at < ?').run(new Date().toISOString());
+  issueSession(res);
+  res.json({ ok: true });
+});
+
+app.post('/api/admin/logout', (req, res) => {
+  const token = getCookie(req, 'admin_session');
+  if (token) db.prepare('DELETE FROM admin_sessions WHERE token_hash = ?').run(sha256(token));
+  res.setHeader('Set-Cookie', 'admin_session=; HttpOnly; Path=/; Max-Age=0');
+  res.json({ ok: true });
+});
+
+app.post('/api/admin/password', requireAdmin, (req, res) => {
+  const { current, next } = req.body;
+  const stored = getConf('password');
+  if (!current || !verifyPassword(String(current), stored)) {
+    return res.status(401).json({ error: '目前密碼錯誤' });
+  }
+  if (!next || next.length < 6) return res.status(400).json({ error: '新密碼至少 6 碼' });
+  setConf('password', hashPassword(next));
+  res.json({ ok: true });
+});
+
+// 面板總覽：成員（含紀錄數）＋回收桶
+app.get('/api/admin/overview', requireAdmin, (req, res) => {
+  const group = db.prepare('SELECT * FROM groups ORDER BY created_at LIMIT 1').get();
+  if (!group) return res.status(404).json({ error: '尚無帳本' });
+
+  const members = db.prepare(`
+    SELECT m.*,
+      (SELECT COUNT(*) FROM expenses e WHERE e.payer_id = m.id) AS paid_count,
+      (SELECT COUNT(*) FROM expense_splits s JOIN expenses e ON e.id = s.expense_id
+        WHERE s.member_id = m.id) AS split_count
+    FROM members m WHERE m.group_id = ? ORDER BY m.created_at`).all(group.id);
+
+  const nameOf = new Map(members.map((m) => [m.id, m.name]));
+  const deleted = db.prepare(`SELECT * FROM expenses WHERE group_id = ? AND deleted_at IS NOT NULL
+    ORDER BY deleted_at DESC`).all(group.id);
+  const splitStmt = db.prepare('SELECT member_id, amount FROM expense_splits WHERE expense_id = ?');
+  for (const e of deleted) {
+    e.payer_name = nameOf.get(e.payer_id) || '?';
+    e.split_names = splitStmt.all(e.id).map((s) => nameOf.get(s.member_id) || '?');
+  }
+
+  res.json({ group, members, deleted });
+});
+
+// 成員改名
+app.post('/api/admin/members/:memberId/rename', requireAdmin, (req, res) => {
+  const name = req.body.name?.trim();
+  if (!name) return res.status(400).json({ error: '請填寫名字' });
+  const member = db.prepare('SELECT * FROM members WHERE id = ?').get(req.params.memberId);
+  if (!member) return res.status(404).json({ error: '找不到成員' });
+  const dup = db.prepare('SELECT 1 FROM members WHERE group_id = ? AND name = ? AND id != ?')
+    .get(member.group_id, name, member.id);
+  if (dup) return res.status(409).json({ error: '已有同名成員' });
+  db.prepare('UPDATE members SET name = ? WHERE id = ?').run(name, member.id);
+  res.json({ ok: true });
+});
+
+// 復原回收桶的支出
+app.post('/api/admin/expenses/:expenseId/restore', requireAdmin, (req, res) => {
+  const result = db.prepare('UPDATE expenses SET deleted_at = NULL WHERE id = ? AND deleted_at IS NOT NULL')
+    .run(req.params.expenseId);
+  if (result.changes === 0) return res.status(404).json({ error: '找不到這筆紀錄' });
+  res.json({ ok: true });
+});
+
+// 永久刪除（僅限已在回收桶的紀錄）
+app.delete('/api/admin/expenses/:expenseId', requireAdmin, (req, res) => {
+  const result = db.prepare('DELETE FROM expenses WHERE id = ? AND deleted_at IS NOT NULL')
+    .run(req.params.expenseId);
+  if (result.changes === 0) return res.status(404).json({ error: '找不到這筆紀錄' });
   res.json({ ok: true });
 });
 

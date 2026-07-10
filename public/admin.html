@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#f5f3ee">
+  <title>管理面板 — 分帳趣</title>
+  <link rel="stylesheet" href="style.css?v=7">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%2344705a'/><text x='50' y='72' font-size='60' text-anchor='middle' fill='white' font-family='Helvetica,Arial,sans-serif' font-weight='bold'>$</text></svg>">
+</head>
+<body>
+
+  <div class="view">
+    <header class="group-header">
+      <span class="overline">分帳趣</span>
+      <h1>管理面板</h1>
+    </header>
+
+    <main class="container">
+      <!-- 設定密碼 / 登入 -->
+      <section id="auth-section" class="card hidden">
+        <h2 id="auth-title">管理員登入</h2>
+        <form id="form-auth">
+          <label>密碼
+            <input type="password" id="auth-password" autocomplete="current-password" required>
+          </label>
+          <label id="auth-confirm-wrap" class="hidden">確認密碼
+            <input type="password" id="auth-confirm" autocomplete="new-password">
+          </label>
+          <button type="submit" class="btn btn-primary" id="auth-submit">登入</button>
+        </form>
+      </section>
+
+      <!-- 面板 -->
+      <div id="panel" class="hidden">
+        <section class="card">
+          <h2>成員管理</h2>
+          <p class="hint">可改名（帳目會跟著更新）；有帳務紀錄的成員無法刪除。</p>
+          <ul id="admin-members" class="member-list"></ul>
+          <form id="form-admin-add" class="inline-form">
+            <input type="text" id="admin-new-name" placeholder="新成員名字" maxlength="20" required>
+            <button type="submit" class="btn btn-secondary btn-sm">新增</button>
+          </form>
+        </section>
+
+        <section class="card">
+          <h2>回收桶</h2>
+          <p class="hint">被刪除的支出會留在這裡，可復原或永久刪除。</p>
+          <ul id="admin-trash" class="expense-list"></ul>
+          <p id="trash-empty" class="empty-hint hidden">回收桶是空的</p>
+        </section>
+
+        <section class="card">
+          <h2>變更密碼</h2>
+          <form id="form-password">
+            <label>目前密碼
+              <input type="password" id="pw-current" autocomplete="current-password" required>
+            </label>
+            <label>新密碼（至少 6 碼）
+              <input type="password" id="pw-next" autocomplete="new-password" minlength="6" required>
+            </label>
+            <button type="submit" class="btn btn-secondary btn-sm">更新密碼</button>
+          </form>
+        </section>
+
+        <button type="button" id="btn-logout" class="btn btn-ghost">登出</button>
+      </div>
+    </main>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="admin.js?v=1"></script>
+</body>
+</html>
