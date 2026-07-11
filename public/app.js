@@ -123,15 +123,14 @@ function renderAll() {
   $('#group-name').textContent = group.name;
   document.title = `${group.name} — 分帳小工具`;
 
-  // 摘要列
-  const monthKey = todayLocal().slice(0, 7);
-  const monthTotal = expenses.reduce(
-    (sum, e) => (isSpend(e) && e.expense_date.startsWith(monthKey) ? sum + e.amount : sum), 0);
-  const monthIncome = expenses.reduce(
-    (sum, e) => (isIncome(e) && e.expense_date.startsWith(monthKey) ? sum + e.amount : sum), 0);
-  $('#month-total').textContent = fmt(monthTotal);
-  $('#month-income').textContent = fmt(monthIncome);
+  // 摘要列：整本帳的總支出／總收入／淨額（一趟旅行一本帳，不以月份切分）
+  const { totalIncome } = state.data;
+  const net = Math.round((totalIncome - total) * 100) / 100;
   $('#total-amount').textContent = fmt(total);
+  $('#total-income').textContent = fmt(totalIncome);
+  const netEl = $('#net-amount');
+  netEl.textContent = (net > 0 ? '+' : '') + fmt(net);
+  netEl.className = 'stat-value ' + (net > 0.005 ? 'positive' : net < -0.005 ? 'negative' : '');
 
   renderFilterChips();
   renderExpenses();
