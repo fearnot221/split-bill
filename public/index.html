@@ -41,7 +41,7 @@
           <div class="chip-row" id="filter-cats"></div>
         </div>
         <ul id="expense-list" class="expense-list"></ul>
-        <p id="expense-empty" class="empty-hint hidden">還沒有任何支出，點右下角「＋」新增第一筆吧！</p>
+        <p id="expense-empty" class="empty-hint hidden">還沒有任何紀錄，點右下角「＋」新增第一筆吧！</p>
       </section>
 
       <!-- 結算 -->
@@ -105,14 +105,14 @@
 
     </main>
 
-    <button id="btn-add-expense" class="fab" aria-label="新增支出">
+    <button id="btn-add-expense" class="fab" aria-label="新增紀錄">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
     </button>
 
     <nav class="tab-bar">
       <button class="tab-btn active" data-tab="expenses">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z"/><path d="M16 8h-6"/><path d="M16 12H8"/></svg>
-        <span>支出</span>
+        <span>明細</span>
       </button>
       <button class="tab-btn" data-tab="settle">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="M7 21h10"/><path d="M12 3v18"/><path d="M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2"/></svg>
@@ -179,13 +179,13 @@
           </div>
         </div>
         <button type="submit" class="btn btn-primary">儲存</button>
-        <button type="button" id="btn-delete-expense" class="btn btn-ghost danger hidden">刪除這筆支出</button>
+        <button type="button" id="btn-delete-expense" class="btn btn-ghost danger hidden">刪除這筆紀錄</button>
       </form>
     </div>
   </div>
 
   <div id="toast" class="toast hidden"></div>
 
-  <script src="app.js?v=12"></script>
+  <script src="app.js?v=13"></script>
 </body>
 </html>

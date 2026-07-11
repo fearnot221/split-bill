@@ -178,8 +178,8 @@ function renderExpenses() {
   const empty = $('#expense-empty');
   empty.classList.toggle('hidden', expenses.length > 0);
   empty.textContent = state.data.expenses.length === 0
-    ? '還沒有任何支出，點右下角「＋」新增第一筆吧！'
-    : '沒有符合條件的支出';
+    ? '還沒有任何紀錄，點右下角「＋」新增第一筆吧！'
+    : '沒有符合條件的紀錄';
 
   // 依日期分組
   const days = [];
