@@ -404,7 +404,9 @@ function setSplitMode(mode) {
   splitMode = mode;
   $('#split-equal').classList.toggle('active', mode === 'equal');
   $('#split-custom').classList.toggle('active', mode === 'custom');
-  $$('#split-members .split-amount-input').forEach((i) => i.classList.toggle('hidden', mode === 'equal'));
+  $('#split-none').classList.toggle('active', mode === 'none');
+  $('#split-members').classList.toggle('hidden', mode === 'none');
+  $$('#split-members .split-amount-input').forEach((i) => i.classList.toggle('hidden', mode !== 'custom'));
   $$('#split-members .split-amount-label').forEach((l) => l.classList.toggle('hidden', mode === 'custom'));
   updateSplitPreview();
 }
@@ -441,13 +443,20 @@ function openExpenseModal(expense = null) {
     inp.addEventListener('change', updateSplitPreview);
   });
 
-  // 編輯時判斷原本是均分還是自訂
+  // 編輯時判斷原本是不分攤、均分還是自訂
   let mode = 'equal';
   if (expense) {
-    const checkedIds = members.filter((m) => splitMap.has(m.id)).map((m) => m.id);
-    const shares = equalSplit(expense.amount, checkedIds.length);
-    const isEqual = checkedIds.every((id, i) => Math.abs(splitMap.get(id) - shares[i]) < 0.011);
-    mode = isEqual ? 'equal' : 'custom';
+    const isSelfOnly = expense.splits.length === 1
+      && expense.splits[0].member_id === expense.payer_id
+      && Math.abs(expense.splits[0].amount - expense.amount) < 0.011;
+    if (isSelfOnly) {
+      mode = 'none';
+    } else {
+      const checkedIds = members.filter((m) => splitMap.has(m.id)).map((m) => m.id);
+      const shares = equalSplit(expense.amount, checkedIds.length);
+      const isEqual = checkedIds.every((id, i) => Math.abs(splitMap.get(id) - shares[i]) < 0.011);
+      mode = isEqual ? 'equal' : 'custom';
+    }
   }
   setSplitMode(mode);
 
@@ -549,6 +558,12 @@ function equalSplit(amount, n) {
 }
 
 function updateSplitPreview() {
+  if (splitMode === 'none') {
+    const el = $('#split-remain');
+    el.classList.remove('hidden');
+    el.textContent = '這筆由付款人自行承擔，不會影響任何人的結餘';
+    return;
+  }
   const amount = Number($('#exp-amount').value) || 0;
   const rows = [...$('#split-members').children];
   const checkedRows = rows.filter((r) => r.querySelector('input[type=checkbox]').checked);
@@ -587,6 +602,7 @@ function updateSplitPreview() {
 $('#exp-amount').addEventListener('input', updateSplitPreview);
 $('#split-equal').addEventListener('click', () => setSplitMode('equal'));
 $('#split-custom').addEventListener('click', () => setSplitMode('custom'));
+$('#split-none').addEventListener('click', () => setSplitMode('none'));
 
 $('#btn-add-expense').addEventListener('click', () => openExpenseModal());
 $('#btn-close-modal').addEventListener('click', closeExpenseModal);
@@ -600,10 +616,13 @@ $('#form-expense').addEventListener('submit', async (ev) => {
   const rows = [...$('#split-members').children];
   const checkedRows = rows.filter((r) => r.querySelector('input[type=checkbox]').checked);
 
-  if (checkedRows.length === 0) return toast('請至少勾選一位分攤成員');
+  if (splitMode !== 'none' && checkedRows.length === 0) return toast('請至少勾選一位分攤成員');
 
   let splits;
-  if (splitMode === 'equal') {
+  if (splitMode === 'none') {
+    // 不分攤：整筆由付款人自行承擔，不影響任何人的結餘
+    splits = [{ memberId: $('#exp-payer').value, amount }];
+  } else if (splitMode === 'equal') {
     const shares = equalSplit(amount, checkedRows.length);
     splits = checkedRows.map((r, i) => ({ memberId: r.dataset.id, amount: shares[i] }));
   } else {
