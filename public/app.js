@@ -44,8 +44,9 @@ let state = {
   data: null,          // 伺服器回傳的帳本資料
   filterText: '',
   filterCat: '全部',
-  statsMonth: 'all',
-  editingId: null,     // 正在編輯的支出 id（null = 新增）
+  statsFrom: '',       // 統計起始日（'' = 不限）
+  statsTo: '',         // 統計結束日（'' = 不限）
+  editingId: null,     // 正在編輯的紀錄 id（null = 新增）
   pollTimer: null,
 };
 
@@ -100,6 +101,14 @@ function escapeHtml(s) {
 }
 
 const isTransfer = (e) => e.category === TRANSFER_CAT;
+const isIncome = (e) => e.kind === 'income';
+const isSpend = (e) => !isIncome(e) && !isTransfer(e);
+
+function addDays(iso, n) {
+  const [y, m, d] = iso.split('-').map(Number);
+  const dt = new Date(y, m - 1, d + n);
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+}
 
 async function refresh() {
   if (!state.groupId) return;
@@ -117,14 +126,12 @@ function renderAll() {
   // 摘要列
   const monthKey = todayLocal().slice(0, 7);
   const monthTotal = expenses.reduce(
-    (sum, e) => (!isTransfer(e) && e.expense_date.startsWith(monthKey) ? sum + e.amount : sum), 0);
+    (sum, e) => (isSpend(e) && e.expense_date.startsWith(monthKey) ? sum + e.amount : sum), 0);
+  const monthIncome = expenses.reduce(
+    (sum, e) => (isIncome(e) && e.expense_date.startsWith(monthKey) ? sum + e.amount : sum), 0);
   $('#month-total').textContent = fmt(monthTotal);
+  $('#month-income').textContent = fmt(monthIncome);
   $('#total-amount').textContent = fmt(total);
-
-  const myBal = balances[state.memberId] ?? 0;
-  const balEl = $('#my-balance');
-  balEl.textContent = fmt(myBal);
-  balEl.className = 'stat-value ' + (myBal > 0.01 ? 'positive' : myBal < -0.01 ? 'negative' : '');
 
   renderFilterChips();
   renderExpenses();
@@ -148,18 +155,20 @@ function matchesFilter(e) {
 }
 
 function expenseItemHtml(e) {
+  const names = escapeHtml(e.splits.map((s) => memberName(s.member_id)).join('、'));
   const meta = isTransfer(e)
-    ? `${escapeHtml(memberName(e.payer_id))} 還款給 ${escapeHtml(e.splits.map((s) => memberName(s.member_id)).join('、'))}`
-    : `${escapeHtml(memberName(e.payer_id))} 付款｜分攤：${escapeHtml(e.splits.map((s) => memberName(s.member_id)).join('、'))}`;
+    ? `${escapeHtml(memberName(e.payer_id))} 還款給 ${names}`
+    : `${escapeHtml(memberName(e.payer_id))} ${isIncome(e) ? '收款' : '付款'}｜分攤：${names}`;
+  const kindCls = isIncome(e) ? ' income' : isTransfer(e) ? ' transfer' : '';
   return `
-    <li class="expense-item${isTransfer(e) ? ' transfer' : ''}" data-id="${e.id}">
+    <li class="expense-item${kindCls}" data-id="${e.id}">
       ${catIcon(e.category)}
       <div class="expense-info">
         <div class="expense-desc">${escapeHtml(e.description)}${e.receipt ? `<span class="clip-ico" title="附有單據">${ICONS.clip}</span>` : ''}</div>
         <div class="expense-meta">${meta}</div>
         ${e.note ? `<div class="expense-note">${escapeHtml(e.note)}</div>` : ''}
       </div>
-      <span class="expense-amount">${fmt(e.amount)}</span>
+      <span class="expense-amount">${isIncome(e) ? '+' : ''}${fmt(e.amount)}</span>
       <button class="expense-del" title="刪除">${ICONS.trash}</button>
     </li>`;
 }
@@ -182,7 +191,7 @@ function renderExpenses() {
   }
 
   list.innerHTML = days.map((day) => {
-    const dayTotal = day.items.reduce((s, e) => (isTransfer(e) ? s : s + e.amount), 0);
+    const dayTotal = day.items.reduce((s, e) => (isSpend(e) ? s + e.amount : s), 0);
     return `
     <li class="expense-day">
       <div class="expense-date-header">
@@ -229,62 +238,35 @@ function renderBalances(members, balances) {
 
 function renderSettlements(settlements) {
   $('#settle-empty').classList.toggle('hidden', settlements.length > 0);
-  $('#settlement-list').innerHTML = settlements.map((s, i) => `
+  $('#settlement-list').innerHTML = settlements.map((s) => `
     <li>
       ${escapeHtml(memberName(s.from))}
       <span class="settle-arrow">→</span>
       ${escapeHtml(memberName(s.to))}
       <span class="settle-amount">${fmt(s.amount)}</span>
-      <button class="settle-done" data-i="${i}">${ICONS.check}已還款</button>
     </li>`).join('');
-
-  $$('#settlement-list .settle-done').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const s = settlements[Number(btn.dataset.i)];
-      const fromName = memberName(s.from);
-      const toName = memberName(s.to);
-      if (!confirm(`確認 ${fromName} 已把 ${fmt(s.amount)} 還給 ${toName}？`)) return;
-      try {
-        await api(`/api/groups/${state.groupId}/expenses`, {
-          method: 'POST',
-          body: JSON.stringify({
-            payerId: s.from,
-            description: `還款給 ${toName}`,
-            amount: s.amount,
-            category: TRANSFER_CAT,
-            expenseDate: todayLocal(),
-            splits: [{ memberId: s.to, amount: s.amount }],
-          }),
-        });
-        toast('已記錄還款');
-        refresh();
-      } catch (e) { toast(e.message); }
-    });
-  });
 }
 
-/* ===== 統計 ===== */
+/* ===== 統計（以天為單位的日期區間） ===== */
+function inStatsRange(e) {
+  if (state.statsFrom && e.expense_date < state.statsFrom) return false;
+  if (state.statsTo && e.expense_date > state.statsTo) return false;
+  return true;
+}
+
 function renderStats() {
-  const real = state.data.expenses.filter((e) => !isTransfer(e));
-
-  // 月份選單（保留目前選擇）
-  const months = [...new Set(real.map((e) => e.expense_date.slice(0, 7)))].sort().reverse();
-  if (state.statsMonth !== 'all' && !months.includes(state.statsMonth)) state.statsMonth = 'all';
-  const sel = $('#stats-month');
-  sel.innerHTML = '<option value="all">全部時間</option>' + months.map((m) => {
-    const [y, mo] = m.split('-');
-    return `<option value="${m}">${y} 年 ${Number(mo)} 月</option>`;
-  }).join('');
-  sel.value = state.statsMonth;
-
-  const filtered = state.statsMonth === 'all'
-    ? real
-    : real.filter((e) => e.expense_date.startsWith(state.statsMonth));
+  const inRange = state.data.expenses.filter(inStatsRange);
+  const filtered = inRange.filter(isSpend);
+  const incomes = inRange.filter(isIncome);
 
   const total = filtered.reduce((s, e) => s + e.amount, 0);
+  const totalIncome = incomes.reduce((s, e) => s + e.amount, 0);
+  const net = Math.round((totalIncome - total) * 100) / 100;
   $('#stat-total').textContent = fmt(total);
-  $('#stat-count').textContent = filtered.length;
-  $('#stat-avg').textContent = filtered.length ? fmt(total / filtered.length) : '$0';
+  $('#stat-income').textContent = fmt(totalIncome);
+  const netEl = $('#stat-net');
+  netEl.textContent = (net > 0 ? '+' : '') + fmt(net);
+  netEl.className = 'stat-value ' + (net > 0.005 ? 'positive' : net < -0.005 ? 'negative' : '');
 
   $('#stats-empty').classList.toggle('hidden', filtered.length > 0);
 
@@ -389,16 +371,52 @@ $('#filter-text').addEventListener('input', (ev) => {
 });
 
 /* ===== 統計操作 ===== */
-$('#stats-month').addEventListener('change', (ev) => {
-  state.statsMonth = ev.target.value;
+function setStatsRange(from, to) {
+  state.statsFrom = from;
+  state.statsTo = to;
+  $('#stats-from').value = from;
+  $('#stats-to').value = to;
   renderStats();
+}
+
+$$('#stats-presets .chip').forEach((chip) => {
+  chip.addEventListener('click', () => {
+    $$('#stats-presets .chip').forEach((c) => c.classList.toggle('active', c === chip));
+    const r = chip.dataset.range;
+    const today = todayLocal();
+    if (r === 'all') setStatsRange('', '');
+    else if (r === 'month') setStatsRange(today.slice(0, 8) + '01', today);
+    else setStatsRange(addDays(today, -(Number(r) - 1)), today);
+  });
 });
+
+for (const id of ['stats-from', 'stats-to']) {
+  $(`#${id}`).addEventListener('change', (ev) => {
+    state[id === 'stats-from' ? 'statsFrom' : 'statsTo'] = ev.target.value;
+    $$('#stats-presets .chip').forEach((c) => c.classList.remove('active'));
+    renderStats();
+  });
+}
+
 $('#btn-export').addEventListener('click', () => {
   location.href = `/api/groups/${state.groupId}/export`;
 });
 
 /* ===== 新增 / 編輯支出 Modal ===== */
 let splitMode = 'equal';
+let expenseKind = 'expense';
+
+function setKind(kind) {
+  expenseKind = kind;
+  $('#kind-expense').classList.toggle('active', kind === 'expense');
+  $('#kind-income').classList.toggle('active', kind === 'income');
+  $('#label-payer').firstChild.textContent = kind === 'income' ? '收款人' : '付款人';
+  $('#modal-title').textContent =
+    (state.editingId ? '編輯' : '新增') + (kind === 'income' ? '收入' : '支出');
+}
+
+$('#kind-expense').addEventListener('click', () => setKind('expense'));
+$('#kind-income').addEventListener('click', () => setKind('income'));
 
 function setSplitMode(mode) {
   splitMode = mode;
@@ -414,7 +432,7 @@ function setSplitMode(mode) {
 function openExpenseModal(expense = null) {
   const { members } = state.data;
   state.editingId = expense?.id || null;
-  $('#modal-title').textContent = expense ? '編輯支出' : '新增支出';
+  setKind(expense?.kind === 'income' ? 'income' : 'expense');
 
   $('#form-expense').reset();
   $('#exp-desc').value = expense?.description || '';
@@ -561,7 +579,9 @@ function updateSplitPreview() {
   if (splitMode === 'none') {
     const el = $('#split-remain');
     el.classList.remove('hidden');
-    el.textContent = '這筆由付款人自行承擔，不會影響任何人的結餘';
+    el.textContent = expenseKind === 'income'
+      ? '這筆屬於收款人自己，不會影響任何人的結餘'
+      : '這筆由付款人自行承擔，不會影響任何人的結餘';
     return;
   }
   const amount = Number($('#exp-amount').value) || 0;
@@ -639,6 +659,7 @@ $('#form-expense').addEventListener('submit', async (ev) => {
     payerId: $('#exp-payer').value,
     description: $('#exp-desc').value,
     amount,
+    kind: expenseKind,
     category: $('#exp-categories .chip.active')?.dataset.cat || '其他',
     expenseDate: $('#exp-date').value,
     note: $('#exp-note').value,
@@ -670,7 +691,7 @@ $('#form-expense').addEventListener('submit', async (ev) => {
       await api(`/api/groups/${state.groupId}/expenses/${expenseId}/receipt`, { method: 'DELETE' });
     }
 
-    toast(isEdit ? '支出已更新' : '支出已新增');
+    toast(isEdit ? '已更新' : '已新增');
     closeExpenseModal();
     refresh();
   } catch (e) { toast(e.message); }

@@ -75,6 +75,9 @@ if (!expenseCols.some((c) => c.name === 'receipt')) {
 if (!expenseCols.some((c) => c.name === 'note')) {
   db.exec('ALTER TABLE expenses ADD COLUMN note TEXT');
 }
+if (!expenseCols.some((c) => c.name === 'kind')) {
+  db.exec("ALTER TABLE expenses ADD COLUMN kind TEXT NOT NULL DEFAULT 'expense'");
+}
 
 // 幫沒有類別的帳本種入預設類別（新帳本與既有資料庫遷移共用）
 const DEFAULT_CATEGORIES = [

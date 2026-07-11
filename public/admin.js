@@ -170,7 +170,7 @@ function renderTrash() {
       <div class="expense-info">
         <div class="expense-desc">${escapeHtml(e.description)}
           <span class="member-tag">${escapeHtml(e.category)}</span></div>
-        <div class="expense-meta">${e.expense_date}｜${escapeHtml(e.payer_name)} 付款 ${fmt(e.amount)}｜
+        <div class="expense-meta">${e.expense_date}｜${escapeHtml(e.payer_name)} ${e.kind === 'income' ? '收款' : '付款'} ${fmt(e.amount)}｜
           分攤：${escapeHtml(e.split_names.join('、'))}｜刪於 ${fmtTime(e.deleted_at)}</div>
         ${e.note ? `<div class="expense-note">${escapeHtml(e.note)}</div>` : ''}
       </div>

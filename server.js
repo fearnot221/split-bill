@@ -54,13 +54,14 @@ function getGroupData(groupId) {
   const splitStmt = db.prepare('SELECT member_id, amount FROM expense_splits WHERE expense_id = ?');
   for (const e of expenses) e.splits = splitStmt.all(e.id);
 
-  // 結餘：付出的 - 應分攤的
+  // 結餘：付出的 - 應分攤的（收入方向相反：收款人持有、分攤人應得）
   const balances = {};
   for (const m of members) balances[m.id] = 0;
   for (const e of expenses) {
-    balances[e.payer_id] = round2((balances[e.payer_id] || 0) + e.amount);
+    const sign = e.kind === 'income' ? -1 : 1;
+    balances[e.payer_id] = round2((balances[e.payer_id] || 0) + sign * e.amount);
     for (const s of e.splits) {
-      balances[s.member_id] = round2((balances[s.member_id] || 0) - s.amount);
+      balances[s.member_id] = round2((balances[s.member_id] || 0) - sign * s.amount);
     }
   }
 
@@ -86,14 +87,18 @@ function getGroupData(groupId) {
   }
 
   const total = round2(
-    expenses.reduce((sum, e) => (e.category === TRANSFER_CATEGORY ? sum : sum + e.amount), 0)
+    expenses.reduce(
+      (sum, e) => (e.kind !== 'income' && e.category !== TRANSFER_CATEGORY ? sum + e.amount : sum), 0)
+  );
+  const totalIncome = round2(
+    expenses.reduce((sum, e) => (e.kind === 'income' ? sum + e.amount : sum), 0)
   );
 
   const categories = db
     .prepare('SELECT id, name, icon FROM categories WHERE group_id = ? ORDER BY sort, rowid')
     .all(groupId);
 
-  return { group, members, expenses, balances, settlements, total, categories };
+  return { group, members, expenses, balances, settlements, total, totalIncome, categories };
 }
 
 // 支出的類別必須存在（還款為系統保留類別）
@@ -140,10 +145,11 @@ app.get('/api/groups/:id/export', (req, res) => {
   if (!data) return res.status(404).json({ error: '找不到帳本' });
   const nameOf = (id) => data.members.find((m) => m.id === id)?.name || '?';
   const esc = (v) => `"${String(v).replace(/"/g, '""')}"`;
-  const rows = [['日期', '說明', '分類', '付款人', '金額', '分攤明細', '備註']];
+  const rows = [['日期', '類型', '說明', '分類', '付款人', '金額', '分攤明細', '備註']];
   for (const e of data.expenses) {
+    const type = e.kind === 'income' ? '收入' : e.category === TRANSFER_CATEGORY ? '還款' : '支出';
     rows.push([
-      e.expense_date, e.description, e.category, nameOf(e.payer_id), e.amount,
+      e.expense_date, type, e.description, e.category, nameOf(e.payer_id), e.amount,
       e.splits.map((s) => `${nameOf(s.member_id)}:${s.amount}`).join('; '),
       e.note || '',
     ]);
@@ -227,10 +233,11 @@ app.delete('/api/groups/:id/categories/:categoryId', (req, res) => {
   res.json({ ok: true });
 });
 
-// 新增支出
+// 新增支出／收入
 app.post('/api/groups/:id/expenses', (req, res) => {
   const { payerId, description, amount, category, expenseDate, splits, note } = req.body;
   const groupId = req.params.id;
+  const kind = req.body.kind === 'income' ? 'income' : 'expense';
   const noteText = (note || '').trim();
   if (noteText.length > 500) return res.status(400).json({ error: '備註最多 500 字' });
 
@@ -261,11 +268,11 @@ app.post('/api/groups/:id/expenses', (req, res) => {
   const expenseId = uid();
   db.transaction(() => {
     db.prepare(
-      `INSERT INTO expenses (id, group_id, payer_id, description, amount, category, expense_date, note)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO expenses (id, group_id, payer_id, description, amount, category, expense_date, note, kind)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       expenseId, groupId, payerId, description.trim(), round2(amt),
-      catName, expenseDate || new Date().toISOString().slice(0, 10), noteText || null
+      catName, expenseDate || new Date().toISOString().slice(0, 10), noteText || null, kind
     );
     const ins = db.prepare(
       'INSERT INTO expense_splits (expense_id, member_id, amount) VALUES (?, ?, ?)'
@@ -277,11 +284,12 @@ app.post('/api/groups/:id/expenses', (req, res) => {
   res.json({ expenseId });
 });
 
-// 編輯支出
+// 編輯支出／收入
 app.put('/api/groups/:id/expenses/:expenseId', (req, res) => {
   const { payerId, description, amount, category, expenseDate, splits, note } = req.body;
   const groupId = req.params.id;
   const expenseId = req.params.expenseId;
+  const kind = req.body.kind === 'income' ? 'income' : 'expense';
   const noteText = (note || '').trim();
   if (noteText.length > 500) return res.status(400).json({ error: '備註最多 500 字' });
 
@@ -317,10 +325,10 @@ app.put('/api/groups/:id/expenses/:expenseId', (req, res) => {
   db.transaction(() => {
     db.prepare(
       `UPDATE expenses SET payer_id = ?, description = ?, amount = ?, category = ?, expense_date = ?,
-       note = ? WHERE id = ?`
+       note = ?, kind = ? WHERE id = ?`
     ).run(
       payerId, description.trim(), round2(amt), catName,
-      expenseDate || new Date().toISOString().slice(0, 10), noteText || null, expenseId
+      expenseDate || new Date().toISOString().slice(0, 10), noteText || null, kind, expenseId
     );
     db.prepare('DELETE FROM expense_splits WHERE expense_id = ?').run(expenseId);
     const ins = db.prepare(

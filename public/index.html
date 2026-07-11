@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="theme-color" content="#f5f3ee">
   <title>分帳小工具 — 記帳分帳</title>
-  <link rel="stylesheet" href="style.css?v=9">
+  <link rel="stylesheet" href="style.css?v=10">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%2344705a'/><text x='50' y='72' font-size='60' text-anchor='middle' fill='white' font-family='Helvetica,Arial,sans-serif' font-weight='bold'>$</text></svg>">
 </head>
 <body>
@@ -23,12 +23,12 @@
           <span class="stat-value" id="month-total">$0</span>
         </div>
         <div class="stat">
-          <span class="stat-label">總支出</span>
-          <span class="stat-value" id="total-amount">$0</span>
+          <span class="stat-label">本月收入</span>
+          <span class="stat-value" id="month-income">$0</span>
         </div>
         <div class="stat">
-          <span class="stat-label">我的結餘</span>
-          <span class="stat-value" id="my-balance">$0</span>
+          <span class="stat-label">總支出</span>
+          <span class="stat-value" id="total-amount">$0</span>
         </div>
       </div>
     </div>
@@ -52,7 +52,6 @@
         </div>
         <div class="card">
           <h2>結算方案</h2>
-          <p class="hint">按「已還款」會記錄一筆還款，結餘自動更新。</p>
           <ul id="settlement-list" class="settlement-list"></ul>
           <p id="settle-empty" class="empty-hint hidden">目前大家互不相欠</p>
         </div>
@@ -61,8 +60,19 @@
       <!-- 統計 -->
       <section id="tab-stats" class="tab-panel hidden">
         <div class="stats-head">
-          <label for="stats-month" class="visually-hidden">統計期間</label>
-          <select id="stats-month"></select>
+          <div class="stats-range">
+            <label class="visually-hidden" for="stats-from">起始日</label>
+            <input type="date" id="stats-from">
+            <span class="range-dash">–</span>
+            <label class="visually-hidden" for="stats-to">結束日</label>
+            <input type="date" id="stats-to">
+          </div>
+          <div class="chip-row" id="stats-presets">
+            <button type="button" class="chip" data-range="7">近 7 天</button>
+            <button type="button" class="chip" data-range="30">近 30 天</button>
+            <button type="button" class="chip" data-range="month">本月</button>
+            <button type="button" class="chip active" data-range="all">全部</button>
+          </div>
         </div>
         <div class="stat-strip">
           <div class="stat">
@@ -70,12 +80,12 @@
             <span class="stat-value" id="stat-total">$0</span>
           </div>
           <div class="stat">
-            <span class="stat-label">筆數</span>
-            <span class="stat-value" id="stat-count">0</span>
+            <span class="stat-label">收入總額</span>
+            <span class="stat-value" id="stat-income">$0</span>
           </div>
           <div class="stat">
-            <span class="stat-label">平均每筆</span>
-            <span class="stat-value" id="stat-avg">$0</span>
+            <span class="stat-label">淨額</span>
+            <span class="stat-value" id="stat-net">$0</span>
           </div>
         </div>
         <div class="card">
@@ -125,6 +135,10 @@
         </button>
       </div>
       <form id="form-expense">
+        <div class="seg kind-seg">
+          <button type="button" id="kind-expense" class="seg-btn active">支出</button>
+          <button type="button" id="kind-income" class="seg-btn">收入</button>
+        </div>
         <label>項目說明
           <input type="text" id="exp-desc" placeholder="例如：晚餐、車票" maxlength="50" required>
         </label>
@@ -138,7 +152,7 @@
         </div>
         <label>分類</label>
         <div id="exp-categories" class="chip-row"></div>
-        <label>付款人
+        <label id="label-payer">付款人
           <select id="exp-payer"></select>
         </label>
         <div class="split-header">
@@ -164,7 +178,7 @@
             <button type="button" id="btn-receipt-remove" class="btn btn-ghost btn-sm danger hidden">移除</button>
           </div>
         </div>
-        <button type="submit" class="btn btn-primary">儲存支出</button>
+        <button type="submit" class="btn btn-primary">儲存</button>
         <button type="button" id="btn-delete-expense" class="btn btn-ghost danger hidden">刪除這筆支出</button>
       </form>
     </div>
@@ -172,6 +186,6 @@
 
   <div id="toast" class="toast hidden"></div>
 
-  <script src="app.js?v=10"></script>
+  <script src="app.js?v=11"></script>
 </body>
 </html>

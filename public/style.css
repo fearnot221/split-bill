@@ -317,7 +317,8 @@ select {
   white-space: nowrap;
   color: var(--red);
 }
-.expense-item.transfer .expense-amount { color: var(--green); }
+.expense-item.transfer .expense-amount { color: var(--sub); }
+.expense-item.income .expense-amount { color: var(--green); }
 
 .clip-ico {
   display: inline-flex;
@@ -444,7 +445,14 @@ select {
 
 /* ===== 統計 ===== */
 .stats-head { margin: 4px 0 2px; }
-.stats-head select { margin-top: 0; font-weight: 600; }
+.stats-range {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.stats-range input { margin-top: 0; flex: 1; min-width: 0; }
+.range-dash { color: var(--sub); flex-shrink: 0; }
+#stats-presets { margin: 10px 0 14px; }
 #tab-stats .stat-strip { border-top: none; margin-bottom: 26px; }
 
 .bar-list { list-style: none; }
@@ -618,6 +626,9 @@ select {
 @keyframes slide-up { from { transform: translateY(48px); opacity: .3; } }
 
 .row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+.kind-seg { margin-bottom: 18px; }
+.kind-seg .seg-btn { flex: 1; padding: 7px 0; }
 
 .split-header {
   display: flex;
