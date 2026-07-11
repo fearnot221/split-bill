@@ -34,8 +34,8 @@ function genCode() {
 
 const round2 = (n) => Math.round(n * 100) / 100;
 
-// 「還款」是成員間轉帳，不算實際消費
-const TRANSFER_CATEGORY = '還款';
+// 「還款」「轉帳」是成員間資金移動，不算實際消費
+const TRANSFER_CATEGORIES = ['還款', '轉帳'];
 
 // 取得群組完整資料（成員、支出、結餘、結算建議）
 function getGroupData(groupId) {
@@ -88,7 +88,8 @@ function getGroupData(groupId) {
 
   const total = round2(
     expenses.reduce(
-      (sum, e) => (e.kind !== 'income' && e.category !== TRANSFER_CATEGORY ? sum + e.amount : sum), 0)
+      (sum, e) =>
+        (e.kind !== 'income' && !TRANSFER_CATEGORIES.includes(e.category) ? sum + e.amount : sum), 0)
   );
   const totalIncome = round2(
     expenses.reduce((sum, e) => (e.kind === 'income' ? sum + e.amount : sum), 0)
@@ -101,9 +102,9 @@ function getGroupData(groupId) {
   return { group, members, expenses, balances, settlements, total, totalIncome, categories };
 }
 
-// 支出的類別必須存在（還款為系統保留類別）
+// 支出的類別必須存在（還款／轉帳為系統保留類別）
 function isValidCategory(groupId, name) {
-  if (name === TRANSFER_CATEGORY) return true;
+  if (TRANSFER_CATEGORIES.includes(name)) return true;
   return !!db.prepare('SELECT 1 FROM categories WHERE group_id = ? AND name = ?').get(groupId, name);
 }
 
@@ -119,6 +120,7 @@ app.get('/api/me', (req, res) => {
       db.prepare('INSERT INTO members (id, group_id, name) VALUES (?, ?, ?)')
         .run(memberId, groupId, '我');
       db.seedCategories(groupId);
+      db.seedFund(groupId);
     })();
     group = db.prepare('SELECT * FROM groups WHERE id = ?').get(groupId);
   }
@@ -147,7 +149,9 @@ app.get('/api/groups/:id/export', (req, res) => {
   const esc = (v) => `"${String(v).replace(/"/g, '""')}"`;
   const rows = [['日期', '類型', '說明', '分類', '付款人', '金額', '分攤明細', '備註']];
   for (const e of data.expenses) {
-    const type = e.kind === 'income' ? '收入' : e.category === TRANSFER_CATEGORY ? '還款' : '支出';
+    const type = e.kind === 'income'
+      ? '收入'
+      : TRANSFER_CATEGORIES.includes(e.category) ? e.category : '支出';
     rows.push([
       e.expense_date, type, e.description, e.category, nameOf(e.payer_id), e.amount,
       e.splits.map((s) => `${nameOf(s.member_id)}:${s.amount}`).join('; '),
@@ -183,9 +187,12 @@ app.post('/api/groups/:id/members', (req, res) => {
   res.json({ memberId });
 });
 
-// 刪除成員（有帳務紀錄則不可刪）
+// 刪除成員（公帳或有帳務紀錄則不可刪）
 app.delete('/api/groups/:id/members/:memberId', (req, res) => {
   const { id, memberId } = req.params;
+  const member = db.prepare('SELECT * FROM members WHERE id = ? AND group_id = ?').get(memberId, id);
+  if (!member) return res.status(404).json({ error: '找不到成員' });
+  if (member.is_fund) return res.status(400).json({ error: '「公帳」為系統帳戶，無法刪除' });
   const involved = db
     .prepare(`SELECT 1 FROM expenses WHERE group_id = ? AND payer_id = ?
               UNION SELECT 1 FROM expense_splits s JOIN expenses e ON e.id = s.expense_id
@@ -202,7 +209,7 @@ app.post('/api/groups/:id/categories', (req, res) => {
   const groupId = req.params.id;
   if (!name) return res.status(400).json({ error: '請填寫類別名稱' });
   if (name.length > 10) return res.status(400).json({ error: '類別名稱最多 10 字' });
-  if (name === TRANSFER_CATEGORY || name === '全部') {
+  if (TRANSFER_CATEGORIES.includes(name) || name === '全部') {
     return res.status(400).json({ error: `「${name}」為系統保留名稱` });
   }
   const group = db.prepare('SELECT id FROM groups WHERE id = ?').get(groupId);
@@ -237,7 +244,7 @@ app.delete('/api/groups/:id/categories/:categoryId', (req, res) => {
 app.post('/api/groups/:id/expenses', (req, res) => {
   const { payerId, description, amount, category, expenseDate, splits, note } = req.body;
   const groupId = req.params.id;
-  const kind = req.body.kind === 'income' ? 'income' : 'expense';
+  let kind = req.body.kind === 'income' ? 'income' : 'expense';
   const noteText = (note || '').trim();
   if (noteText.length > 500) return res.status(400).json({ error: '備註最多 500 字' });
 
@@ -264,6 +271,11 @@ app.post('/api/groups/:id/expenses', (req, res) => {
   }
   const catName = category || '其他';
   if (!isValidCategory(groupId, catName)) return res.status(400).json({ error: '類別不存在' });
+  if (TRANSFER_CATEGORIES.includes(catName)) {
+    kind = 'expense'; // 轉帳一律是「匯款人 +、收款方 −」，不走收入方向
+    if (splits.length !== 1) return res.status(400).json({ error: '轉帳需指定一位收款對象' });
+    if (splits[0].memberId === payerId) return res.status(400).json({ error: '不能轉帳給自己' });
+  }
 
   const expenseId = uid();
   db.transaction(() => {
@@ -289,7 +301,7 @@ app.put('/api/groups/:id/expenses/:expenseId', (req, res) => {
   const { payerId, description, amount, category, expenseDate, splits, note } = req.body;
   const groupId = req.params.id;
   const expenseId = req.params.expenseId;
-  const kind = req.body.kind === 'income' ? 'income' : 'expense';
+  let kind = req.body.kind === 'income' ? 'income' : 'expense';
   const noteText = (note || '').trim();
   if (noteText.length > 500) return res.status(400).json({ error: '備註最多 500 字' });
 
@@ -321,6 +333,11 @@ app.put('/api/groups/:id/expenses/:expenseId', (req, res) => {
   }
   const catName = category || '其他';
   if (!isValidCategory(groupId, catName)) return res.status(400).json({ error: '類別不存在' });
+  if (TRANSFER_CATEGORIES.includes(catName)) {
+    kind = 'expense';
+    if (splits.length !== 1) return res.status(400).json({ error: '轉帳需指定一位收款對象' });
+    if (splits[0].memberId === payerId) return res.status(400).json({ error: '不能轉帳給自己' });
+  }
 
   db.transaction(() => {
     db.prepare(

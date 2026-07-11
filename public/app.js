@@ -2,7 +2,7 @@
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
 
-const TRANSFER_CAT = '還款';
+const TRANSFER_CATS = ['還款', '轉帳']; // 成員間資金移動的保留類別（不計入消費統計）
 
 const svgWrap = (paths, sw = 1.8) =>
   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
@@ -24,7 +24,7 @@ const ICONS = {
 
 // 類別的圖示與顏色：預設類別有專屬圖示；自訂類別用 tag 圖示、依名稱雜湊配色
 function catMeta(cat) {
-  if (cat === TRANSFER_CAT) return { icon: 'transfer', color: 'cat-transfer' };
+  if (TRANSFER_CATS.includes(cat)) return { icon: 'transfer', color: 'cat-transfer' };
   const c = state.data?.categories?.find((x) => x.name === cat);
   const icon = c?.icon || 'other';
   if (icon !== 'tag') return { icon, color: `cat-${icon}` };
@@ -100,7 +100,7 @@ function escapeHtml(s) {
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-const isTransfer = (e) => e.category === TRANSFER_CAT;
+const isTransfer = (e) => TRANSFER_CATS.includes(e.category);
 const isIncome = (e) => e.kind === 'income';
 const isSpend = (e) => !isIncome(e) && !isTransfer(e);
 
@@ -156,7 +156,7 @@ function matchesFilter(e) {
 function expenseItemHtml(e) {
   const names = escapeHtml(e.splits.map((s) => memberName(s.member_id)).join('、'));
   const meta = isTransfer(e)
-    ? `${escapeHtml(memberName(e.payer_id))} 還款給 ${names}`
+    ? `${escapeHtml(memberName(e.payer_id))} ${e.category === '還款' ? '還款' : '匯款'}給 ${names}`
     : `${escapeHtml(memberName(e.payer_id))} ${isIncome(e) ? '收款' : '付款'}｜分攤：${names}`;
   const kindCls = isIncome(e) ? ' income' : isTransfer(e) ? ' transfer' : '';
   return `
@@ -214,10 +214,7 @@ function renderExpenses() {
       } catch (e) { toast(e.message); }
     });
 
-    // 點擊項目編輯（還款只能刪除）
-    if (!isTransfer(expense)) {
-      item.addEventListener('click', () => openExpenseModal(expense));
-    }
+    item.addEventListener('click', () => openExpenseModal(expense));
   });
 }
 
@@ -225,6 +222,16 @@ function renderExpenses() {
 function renderBalances(members, balances) {
   $('#balance-list').innerHTML = members.map((m) => {
     const bal = balances[m.id] ?? 0;
+    // 公帳的負結餘代表「還握有大家的錢」，改以餘額呈現
+    if (m.is_fund) {
+      const held = Math.round(-bal * 100) / 100;
+      const cls = held > 0.01 ? 'positive' : held < -0.01 ? 'negative' : 'zero';
+      return `
+      <li>
+        <span class="member-name-row">${escapeHtml(m.name)}</span>
+        <span class="balance-amount ${cls}">${held < -0.01 ? '透支' : '餘額'} ${fmt(Math.abs(held))}</span>
+      </li>`;
+    }
     const cls = bal > 0.01 ? 'positive' : bal < -0.01 ? 'negative' : 'zero';
     const note = bal > 0.01 ? '應收' : bal < -0.01 ? '應付' : '結清';
     return `
@@ -292,8 +299,10 @@ function renderStats() {
     paid[e.payer_id] = (paid[e.payer_id] || 0) + e.amount;
     for (const s of e.splits) share[s.member_id] = (share[s.member_id] || 0) + s.amount;
   }
-  const maxPaid = Math.max(...members.map((m) => paid[m.id] || 0), 1);
-  $('#member-stats').innerHTML = members.map((m) => {
+  // 公帳沒付過錢就不佔一行
+  const statMembers = members.filter((m) => !m.is_fund || paid[m.id]);
+  const maxPaid = Math.max(...statMembers.map((m) => paid[m.id] || 0), 1);
+  $('#member-stats').innerHTML = statMembers.map((m) => {
     const p = paid[m.id] || 0;
     const sh = share[m.id] || 0;
     const pct = Math.round((p / maxPaid) * 100);
@@ -314,7 +323,9 @@ const chipHtml = (cat, active) =>
   `<button type="button" class="chip${active ? ' active' : ''}" data-cat="${escapeHtml(cat)}"><span>${escapeHtml(cat)}</span></button>`;
 
 function renderFilterChips() {
-  const names = ['全部', ...state.data.categories.map((c) => c.name), TRANSFER_CAT];
+  // 只有實際出現過的轉帳類別才顯示快篩 chip
+  const extras = TRANSFER_CATS.filter((c) => state.data.expenses.some((e) => e.category === c));
+  const names = ['全部', ...state.data.categories.map((c) => c.name), ...extras];
   const row = $('#filter-cats');
   if (row.dataset.cats === names.join('|')) return; // 類別沒變就不重建
   row.dataset.cats = names.join('|');
@@ -404,18 +415,56 @@ $('#btn-export').addEventListener('click', () => {
 /* ===== 新增 / 編輯支出 Modal ===== */
 let splitMode = 'equal';
 let expenseKind = 'expense';
+let transferCat = '轉帳'; // 編輯舊「還款」紀錄時保留原類別
 
 function setKind(kind) {
   expenseKind = kind;
+  const isTr = kind === 'transfer';
   $('#kind-expense').classList.toggle('active', kind === 'expense');
   $('#kind-income').classList.toggle('active', kind === 'income');
-  $('#label-payer').firstChild.textContent = kind === 'income' ? '收款人' : '付款人';
-  $('#modal-title').textContent =
-    (state.editingId ? '編輯' : '新增') + (kind === 'income' ? '收入' : '支出');
+  $('#kind-transfer').classList.toggle('active', isTr);
+  $('#label-payer').firstChild.textContent =
+    isTr ? '匯款人' : kind === 'income' ? '收款人' : '付款人';
+  $('#modal-title').textContent = (state.editingId ? '編輯' : '新增') +
+    (isTr ? '轉帳' : kind === 'income' ? '收入' : '支出');
+
+  // 轉帳模式：隱藏分類與分攤，改成選收款對象；說明改為選填
+  $('#label-cats').classList.toggle('hidden', isTr);
+  $('#exp-categories').classList.toggle('hidden', isTr);
+  $('.split-header').classList.toggle('hidden', isTr);
+  $('#label-transfer-to').classList.toggle('hidden', !isTr);
+  $('#exp-desc').required = !isTr;
+  $('#exp-desc').placeholder = isTr ? '選填，例如：訂房代墊、儲值公帳' : '例如：晚餐、車票';
+  if (isTr) {
+    $('#split-members').classList.add('hidden');
+    $('#split-toolbar').classList.add('hidden');
+    $('#split-remain').classList.add('hidden');
+    renderTransferTargets();
+  } else {
+    setSplitMode(splitMode); // 恢復分攤區塊的顯示狀態
+  }
 }
 
 $('#kind-expense').addEventListener('click', () => setKind('expense'));
 $('#kind-income').addEventListener('click', () => setKind('income'));
+$('#kind-transfer').addEventListener('click', () => setKind('transfer'));
+
+// 收款對象：所有成員（公帳排最前面），排除目前的匯款人
+function renderTransferTargets(selected) {
+  const sel = $('#exp-transfer-to');
+  const prev = selected ?? sel.value;
+  const payerId = $('#exp-payer').value;
+  const targets = state.data.members
+    .filter((m) => m.id !== payerId)
+    .sort((a, b) => (b.is_fund ? 1 : 0) - (a.is_fund ? 1 : 0));
+  sel.innerHTML = targets.map((m) =>
+    `<option value="${m.id}">${escapeHtml(m.name)}</option>`).join('');
+  if (targets.some((m) => m.id === prev)) sel.value = prev;
+}
+
+$('#exp-payer').addEventListener('change', () => {
+  if (expenseKind === 'transfer') renderTransferTargets();
+});
 
 function setSplitMode(mode) {
   splitMode = mode;
@@ -423,6 +472,7 @@ function setSplitMode(mode) {
   $('#split-custom').classList.toggle('active', mode === 'custom');
   $('#split-none').classList.toggle('active', mode === 'none');
   $('#split-members').classList.toggle('hidden', mode === 'none');
+  $('#split-toolbar').classList.toggle('hidden', mode === 'none');
   $$('#split-members .split-amount-input').forEach((i) => i.classList.toggle('hidden', mode !== 'custom'));
   $$('#split-members .split-amount-label').forEach((l) => l.classList.toggle('hidden', mode === 'custom'));
   updateSplitPreview();
@@ -431,7 +481,6 @@ function setSplitMode(mode) {
 function openExpenseModal(expense = null) {
   const { members } = state.data;
   state.editingId = expense?.id || null;
-  setKind(expense?.kind === 'income' ? 'income' : 'expense');
 
   $('#form-expense').reset();
   $('#exp-desc').value = expense?.description || '';
@@ -439,14 +488,21 @@ function openExpenseModal(expense = null) {
   $('#exp-date').value = expense?.expense_date || todayLocal();
   $('#exp-note').value = expense?.note || '';
 
-  renderModalCats(expense?.category || state.data.categories[0]?.name);
+  const editingTransfer = !!expense && isTransfer(expense);
+  transferCat = editingTransfer ? expense.category : '轉帳';
+
+  renderModalCats(!expense || editingTransfer
+    ? state.data.categories[0]?.name
+    : expense.category);
 
   $('#exp-payer').innerHTML = members.map((m) =>
     `<option value="${m.id}">${escapeHtml(m.name)}</option>`).join('');
   $('#exp-payer').value = expense?.payer_id || state.memberId;
 
+  // 分攤名單不含公帳（公帳的錢進出用「轉帳」或當付款人）
+  const splitMembers = members.filter((m) => !m.is_fund);
   const splitMap = new Map((expense?.splits || []).map((s) => [s.member_id, s.amount]));
-  $('#split-members').innerHTML = members.map((m) => `
+  $('#split-members').innerHTML = splitMembers.map((m) => `
     <li data-id="${m.id}">
       <input type="checkbox" ${!expense || splitMap.has(m.id) ? 'checked' : ''}>
       <span class="split-name">${escapeHtml(m.name)}</span>
@@ -462,20 +518,24 @@ function openExpenseModal(expense = null) {
 
   // 編輯時判斷原本是不分攤、均分還是自訂
   let mode = 'equal';
-  if (expense) {
+  if (expense && !editingTransfer) {
     const isSelfOnly = expense.splits.length === 1
       && expense.splits[0].member_id === expense.payer_id
       && Math.abs(expense.splits[0].amount - expense.amount) < 0.011;
     if (isSelfOnly) {
       mode = 'none';
     } else {
-      const checkedIds = members.filter((m) => splitMap.has(m.id)).map((m) => m.id);
+      const checkedIds = splitMembers.filter((m) => splitMap.has(m.id)).map((m) => m.id);
       const shares = equalSplit(expense.amount, checkedIds.length);
       const isEqual = checkedIds.every((id, i) => Math.abs(splitMap.get(id) - shares[i]) < 0.011);
       mode = isEqual ? 'equal' : 'custom';
     }
   }
   setSplitMode(mode);
+
+  // kind 要等付款人與分攤名單就緒後再設（轉帳模式會依付款人組出收款對象）
+  setKind(editingTransfer ? 'transfer' : expense?.kind === 'income' ? 'income' : 'expense');
+  if (editingTransfer) renderTransferTargets(expense.splits[0]?.member_id);
 
   // 單據與刪除鈕
   receiptState = { pending: null, existing: expense?.receipt || null, removed: false };
@@ -574,7 +634,22 @@ function equalSplit(amount, n) {
   return Array.from({ length: n }, (_, i) => (base + (i < extra ? 1 : 0)) / 100);
 }
 
+function updateSplitToggleAll() {
+  const boxes = [...$$('#split-members input[type=checkbox]')];
+  $('#split-toggle-all').textContent =
+    boxes.length && boxes.every((b) => b.checked) ? '全不選' : '全選';
+}
+
+$('#split-toggle-all').addEventListener('click', () => {
+  const boxes = [...$$('#split-members input[type=checkbox]')];
+  const allChecked = boxes.length && boxes.every((b) => b.checked);
+  boxes.forEach((b) => { b.checked = !allChecked; });
+  updateSplitPreview();
+});
+
 function updateSplitPreview() {
+  if (expenseKind === 'transfer') return;
+  updateSplitToggleAll();
   if (splitMode === 'none') {
     const el = $('#split-remain');
     el.classList.remove('hidden');
@@ -632,38 +707,57 @@ $('#modal-expense').addEventListener('click', (ev) => {
 $('#form-expense').addEventListener('submit', async (ev) => {
   ev.preventDefault();
   const amount = Number($('#exp-amount').value);
-  const rows = [...$('#split-members').children];
-  const checkedRows = rows.filter((r) => r.querySelector('input[type=checkbox]').checked);
+  let payload;
 
-  if (splitMode !== 'none' && checkedRows.length === 0) return toast('請至少勾選一位分攤成員');
-
-  let splits;
-  if (splitMode === 'none') {
-    // 不分攤：整筆由付款人自行承擔，不影響任何人的結餘
-    splits = [{ memberId: $('#exp-payer').value, amount }];
-  } else if (splitMode === 'equal') {
-    const shares = equalSplit(amount, checkedRows.length);
-    splits = checkedRows.map((r, i) => ({ memberId: r.dataset.id, amount: shares[i] }));
+  if (expenseKind === 'transfer') {
+    const to = $('#exp-transfer-to').value;
+    if (!to) return toast('請選擇收款對象');
+    const toMember = state.data.members.find((m) => m.id === to);
+    payload = {
+      payerId: $('#exp-payer').value,
+      description: $('#exp-desc').value.trim()
+        || (toMember?.is_fund ? '存入公帳' : `匯款給 ${toMember?.name ?? '?'}`),
+      amount,
+      kind: 'expense',
+      category: transferCat,
+      expenseDate: $('#exp-date').value,
+      note: $('#exp-note').value,
+      splits: [{ memberId: to, amount }],
+    };
   } else {
-    splits = checkedRows
-      .map((r) => ({
-        memberId: r.dataset.id,
-        amount: Number(r.querySelector('.split-amount-input').value) || 0,
-      }))
-      .filter((s) => s.amount > 0);
-    if (splits.length === 0) return toast('請填寫分攤金額');
-  }
+    const rows = [...$('#split-members').children];
+    const checkedRows = rows.filter((r) => r.querySelector('input[type=checkbox]').checked);
 
-  const payload = {
-    payerId: $('#exp-payer').value,
-    description: $('#exp-desc').value,
-    amount,
-    kind: expenseKind,
-    category: $('#exp-categories .chip.active')?.dataset.cat || '其他',
-    expenseDate: $('#exp-date').value,
-    note: $('#exp-note').value,
-    splits,
-  };
+    if (splitMode !== 'none' && checkedRows.length === 0) return toast('請至少勾選一位分攤成員');
+
+    let splits;
+    if (splitMode === 'none') {
+      // 不分攤：整筆由付款人自行承擔，不影響任何人的結餘
+      splits = [{ memberId: $('#exp-payer').value, amount }];
+    } else if (splitMode === 'equal') {
+      const shares = equalSplit(amount, checkedRows.length);
+      splits = checkedRows.map((r, i) => ({ memberId: r.dataset.id, amount: shares[i] }));
+    } else {
+      splits = checkedRows
+        .map((r) => ({
+          memberId: r.dataset.id,
+          amount: Number(r.querySelector('.split-amount-input').value) || 0,
+        }))
+        .filter((s) => s.amount > 0);
+      if (splits.length === 0) return toast('請填寫分攤金額');
+    }
+
+    payload = {
+      payerId: $('#exp-payer').value,
+      description: $('#exp-desc').value,
+      amount,
+      kind: expenseKind,
+      category: $('#exp-categories .chip.active')?.dataset.cat || '其他',
+      expenseDate: $('#exp-date').value,
+      note: $('#exp-note').value,
+      splits,
+    };
+  }
 
   try {
     const isEdit = !!state.editingId;

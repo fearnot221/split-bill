@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS members (
   id TEXT PRIMARY KEY,
   group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
+  is_fund INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE (group_id, name)
 );
@@ -78,6 +79,10 @@ if (!expenseCols.some((c) => c.name === 'note')) {
 if (!expenseCols.some((c) => c.name === 'kind')) {
   db.exec("ALTER TABLE expenses ADD COLUMN kind TEXT NOT NULL DEFAULT 'expense'");
 }
+const memberCols = db.prepare('PRAGMA table_info(members)').all();
+if (!memberCols.some((c) => c.name === 'is_fund')) {
+  db.exec('ALTER TABLE members ADD COLUMN is_fund INTEGER NOT NULL DEFAULT 0');
+}
 
 // 幫沒有類別的帳本種入預設類別（新帳本與既有資料庫遷移共用）
 const DEFAULT_CATEGORIES = [
@@ -92,6 +97,22 @@ db.seedCategories = (groupId) => {
     ins.run(require('crypto').randomUUID(), groupId, name, icon, i);
   });
 };
-for (const g of db.prepare('SELECT id FROM groups').all()) db.seedCategories(g.id);
+// 幫每本帳補上「公帳」虛擬成員：可收轉帳（存入公費）、也可作為付款人（公費支出）
+db.seedFund = (groupId) => {
+  const has = db.prepare('SELECT 1 FROM members WHERE group_id = ? AND is_fund = 1 LIMIT 1').get(groupId);
+  if (has) return;
+  const named = db.prepare('SELECT id FROM members WHERE group_id = ? AND name = ?').get(groupId, '公帳');
+  if (named) {
+    db.prepare('UPDATE members SET is_fund = 1 WHERE id = ?').run(named.id);
+  } else {
+    db.prepare('INSERT INTO members (id, group_id, name, is_fund) VALUES (?, ?, ?, 1)')
+      .run(require('crypto').randomUUID(), groupId, '公帳');
+  }
+};
+
+for (const g of db.prepare('SELECT id FROM groups').all()) {
+  db.seedCategories(g.id);
+  db.seedFund(g.id);
+}
 
 module.exports = db;

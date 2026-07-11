@@ -89,16 +89,19 @@ async function loadPanel() {
 function renderMembers() {
   $('#admin-members').innerHTML = overview.members.map((m) => {
     const records = m.paid_count + m.split_count;
+    const delDisabled = m.is_fund
+      ? 'disabled title="公帳為系統帳戶，無法刪除"'
+      : records > 0 ? 'disabled title="有帳務紀錄，無法刪除"' : '';
     return `
       <li data-id="${m.id}">
         <span class="member-name-row">
           ${escapeHtml(m.name)}
+          ${m.is_fund ? '<span class="member-tag">公帳</span>' : ''}
           <span class="member-tag">${records} 筆紀錄</span>
         </span>
         <span class="admin-actions">
           <button type="button" class="pill-btn act-rename">改名</button>
-          <button type="button" class="pill-btn danger act-del"
-            ${records > 0 ? 'disabled title="有帳務紀錄，無法刪除"' : ''}>刪除</button>
+          <button type="button" class="pill-btn danger act-del" ${delDisabled}>刪除</button>
         </span>
       </li>`;
   }).join('');

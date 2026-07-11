@@ -658,6 +658,12 @@ select {
 }
 .seg-btn.active { background: var(--ink); color: var(--paper); }
 
+.split-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 6px;
+}
+
 .split-list {
   list-style: none;
   margin-bottom: 16px;
