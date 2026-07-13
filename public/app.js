@@ -679,6 +679,7 @@ function renderSmartReceipt() {
 
 async function setSmartReceiptFile(file) {
   if (!file) return;
+  if (smartAnalyzing) throw new Error('分析進行中，請先取消再更換單據');
   if (!file.type.startsWith('image/')) throw new Error('請選擇圖片檔案');
   if (file.size > 25 * 1024 * 1024) throw new Error('圖片過大（原始檔上限 25MB）');
   const sequence = ++smartReceiptSequence;
@@ -1066,6 +1067,7 @@ $('#smart-input').addEventListener('paste', (ev) => {
 });
 const smartEntry = $('#smart-entry-title').closest('.smart-entry');
 smartEntry.addEventListener('dragover', (ev) => {
+  if (smartAnalyzing) return;
   if (![...(ev.dataTransfer?.types || [])].includes('Files')) return;
   ev.preventDefault();
   ev.dataTransfer.dropEffect = 'copy';
@@ -1078,6 +1080,10 @@ smartEntry.addEventListener('drop', (ev) => {
   smartEntry.classList.remove('dragging');
   if (![...(ev.dataTransfer?.types || [])].includes('Files')) return;
   ev.preventDefault();
+  if (smartAnalyzing) {
+    setSmartFeedback('分析進行中，請先取消再更換單據', true);
+    return;
+  }
   const image = [...(ev.dataTransfer?.files || [])].find((file) => file.type.startsWith('image/'));
   if (!image) {
     setSmartFeedback('請拖入圖片格式的單據', true);
