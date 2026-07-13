@@ -663,6 +663,13 @@ function setSmartFeedback(message, error = false) {
   feedback.classList.toggle('error', error);
 }
 
+function syncSmartAnalyzeButton() {
+  const hasInput = !!$('#smart-input').value.trim() || !!smartReceiptDataUrl;
+  $('#btn-smart-analyze').disabled = smartAnalyzing
+    ? false
+    : !state.groupId || !!smartReceiptTask || !hasInput;
+}
+
 function resizeSmartInput() {
   const input = $('#smart-input');
   input.style.height = 'auto';
@@ -682,7 +689,7 @@ function setSmartAnalyzing(analyzing) {
   $('#btn-smart-receipt').disabled = analyzing;
   $('#btn-smart-voice').disabled = analyzing;
   $('#btn-smart-receipt-remove').disabled = analyzing;
-  $('#btn-smart-analyze').disabled = !!smartReceiptTask && !analyzing;
+  syncSmartAnalyzeButton();
   const label = $('#btn-smart-analyze span');
   label.textContent = analyzing ? '取消分析' : smartReceiptTask ? '處理單據…' : '分析帳目';
   $('#btn-smart-analyze').classList.toggle('analyzing', analyzing);
@@ -729,7 +736,7 @@ async function setSmartReceiptFile(file) {
   const sequence = ++smartReceiptSequence;
   const task = compressImage(file);
   smartReceiptTask = task;
-  $('#btn-smart-analyze').disabled = true;
+  syncSmartAnalyzeButton();
   $('#btn-smart-analyze span').textContent = '處理單據…';
   setSmartFeedback('正在準備單據圖片…');
   try {
@@ -747,7 +754,7 @@ async function setSmartReceiptFile(file) {
   } finally {
     if (sequence === smartReceiptSequence) {
       smartReceiptTask = null;
-      $('#btn-smart-analyze').disabled = false;
+      syncSmartAnalyzeButton();
       $('#btn-smart-analyze span').textContent = '分析帳目';
     }
   }
@@ -757,7 +764,7 @@ async function loadAiStatus() {
   const status = await api('/api/ai/status');
   state.aiStatus = status;
   $('#smart-mode').textContent = status.mode === 'openai' ? 'AI 單據辨識' : '基本文字解析';
-  $('#btn-smart-analyze').disabled = false;
+  syncSmartAnalyzeButton();
   if (status.mode !== 'openai' && !$('#smart-input').value && !smartReceiptDataUrl) {
     setSmartFeedback('尚未設定 AI 金鑰，仍可使用基本文字解析');
   }
@@ -774,6 +781,7 @@ function clearSmartEntry() {
   aiDraftActive = false;
   aiDraftConsumesSmartEntry = false;
   renderSmartReceipt();
+  syncSmartAnalyzeButton();
   clearTimeout(smartPersistTimer);
   deleteSmartDraft().catch(() => {});
   setSmartFeedback('帳目已儲存');
@@ -851,6 +859,7 @@ async function restoreSmartDraft() {
     smartReceiptDataUrl = typeof draft.receiptDataUrl === 'string' ? draft.receiptDataUrl : null;
     smartReceiptName = typeof draft.receiptName === 'string' ? draft.receiptName : '';
     renderSmartReceipt();
+    syncSmartAnalyzeButton();
     setSmartFeedback('已復原尚未儲存的記帳草稿');
   } catch {}
 }
@@ -1107,7 +1116,7 @@ $('#btn-smart-receipt-remove').addEventListener('click', () => {
   smartReceiptTask = null;
   smartReceiptDataUrl = null;
   smartReceiptName = '';
-  $('#btn-smart-analyze').disabled = false;
+  syncSmartAnalyzeButton();
   $('#btn-smart-analyze span').textContent = '分析帳目';
   renderSmartReceipt();
   scheduleSmartDraftPersist();
@@ -1125,6 +1134,7 @@ $('#smart-input').addEventListener('keydown', (ev) => {
 });
 $('#smart-input').addEventListener('input', () => {
   resizeSmartInput();
+  syncSmartAnalyzeButton();
   scheduleSmartDraftPersist();
 });
 $('#smart-input').addEventListener('paste', (ev) => {
@@ -1823,7 +1833,7 @@ async function initialize() {
     await restoreSmartDraft();
     loadAiStatus().catch(() => {
       $('#smart-mode').textContent = '狀態未知';
-      $('#btn-smart-analyze').disabled = false;
+      syncSmartAnalyzeButton();
     });
     if (!state.pollTimer) {
       state.pollTimer = setInterval(() => refresh({ poll: true }).catch(() => {}), 15000);
