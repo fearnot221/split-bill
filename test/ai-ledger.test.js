@@ -239,6 +239,21 @@ test('local parser validates thousands separators', () => {
   }
 });
 
+test('local parser prefers the final paid amount over subtotals and discounts', () => {
+  for (const [text, amount, description] of [
+    ['晚餐總額500折扣50實付450我付', 450, '晚餐'],
+    ['旅館原價2k折後1.5k我付', 1500, '旅館'],
+    ['午餐小計五百折扣五十應付四百五十元', 450, '午餐'],
+  ]) {
+    const draft = normalizeDraft(
+      localParse(text, { ...context, today: '2026-07-14', hasReceipt: false }),
+      { ...context, today: '2026-07-14', sourceText: text }
+    );
+    assert.equal(draft.amount, amount, text);
+    assert.equal(draft.description, description, text);
+  }
+});
+
 test('local parser consumes common Taiwan currency prefixes', () => {
   for (const [text, amount, description] of [
     ['NTD500晚餐我付', 500, '晚餐'],
