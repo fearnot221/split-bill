@@ -1053,6 +1053,15 @@ select {
 #btn-logout { margin-top: 4px; }
 
 @media (max-width: 420px) {
+  .stat + .stat { padding-left: 8px; }
+  .stat-value {
+    font-size: .875rem;
+    line-height: 1.25;
+    overflow: visible;
+    overflow-wrap: anywhere;
+    text-overflow: clip;
+    white-space: normal;
+  }
   .ai-usage-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .ai-usage-stat:nth-child(3) { border-left: none; border-top: 1px solid var(--rule); }
   .ai-usage-stat:nth-child(4) { border-top: 1px solid var(--rule); }
