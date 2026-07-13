@@ -21,11 +21,28 @@ const positiveIntegerEnv = (value, fallback) => {
   const parsed = Number(value);
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
 };
+const readOpenAiApiKeyFile = (filename) => {
+  if (!filename) return '';
+  const resolved = path.resolve(filename);
+  const stats = fs.statSync(resolved);
+  if (!stats.isFile() || stats.size > 64 * 1024) {
+    throw new Error('OPENAI_API_KEY_FILE must be a regular file no larger than 64KB');
+  }
+  const content = fs.readFileSync(resolved, 'utf8').trim();
+  let key = content;
+  if (content.startsWith('{')) {
+    const parsed = JSON.parse(content);
+    key = typeof parsed?.OPENAI_API_KEY === 'string' ? parsed.OPENAI_API_KEY.trim() : '';
+  }
+  if (!key) throw new Error('OPENAI_API_KEY_FILE does not contain an API key');
+  return key;
+};
 const PORT = process.env.PORT || 3000;
 const APP_USERNAME = process.env.APP_USERNAME || 'ledger';
 const APP_PASSWORD = process.env.APP_PASSWORD || '';
 const ALLOW_PUBLIC_ACCESS = process.env.ALLOW_PUBLIC_ACCESS === '1';
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY
+  || readOpenAiApiKeyFile(process.env.OPENAI_API_KEY_FILE);
 const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-5.6';
 const OPENAI_TIMEOUT_MS = positiveIntegerEnv(process.env.OPENAI_TIMEOUT_MS, 30_000);
 const AI_REQUESTS_PER_HOUR = positiveIntegerEnv(process.env.AI_REQUESTS_PER_HOUR, 30);

@@ -49,6 +49,8 @@ test('falls back to an editable local draft when OpenAI is unavailable', async (
   });
   const upstreamPort = await listen(upstream);
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'split-bill-ai-fallback-'));
+  const keyFile = path.join(tempDir, 'auth.json');
+  await fs.writeFile(keyFile, JSON.stringify({ OPENAI_API_KEY: 'test-key' }), { mode: 0o600 });
   const child = spawn(process.execPath, ['-e', [
     "const app = require('./server')",
     "const server = app.listen(0, '127.0.0.1', () => console.log('READY ' + server.address().port))",
@@ -59,7 +61,8 @@ test('falls back to an editable local draft when OpenAI is unavailable', async (
       NODE_ENV: 'test',
       DB_PATH: path.join(tempDir, 'data.db'),
       UPLOAD_DIR: path.join(tempDir, 'uploads'),
-      OPENAI_API_KEY: 'test-key',
+      OPENAI_API_KEY: '',
+      OPENAI_API_KEY_FILE: keyFile,
       OPENAI_BASE_URL: `http://127.0.0.1:${upstreamPort}/v1`,
       OPENAI_TIMEOUT_MS: '1000',
     },

@@ -74,6 +74,14 @@ APP_USERNAME=ledger APP_PASSWORD='請使用足夠長的密碼' npm start
 OPENAI_API_KEY='sk-...' npm start
 ```
 
+`npm start` 與 `npm run dev` 會自動載入專案根目錄中已被 Git 忽略的 `.env`。若不希望把金鑰複製進 `.env`，可改為指定只允許服務帳號讀取的純文字或 JSON secret file：
+
+```bash
+OPENAI_API_KEY_FILE='/run/secrets/openai.json'
+```
+
+JSON 檔案格式為 `{ "OPENAI_API_KEY": "..." }`；直接設定 `OPENAI_API_KEY` 時會優先使用環境變數。
+
 預設模型為 `gpt-5.6`，可以依部署需求調整：
 
 ```bash
@@ -90,6 +98,7 @@ OPENAI_MODEL='供應商模型名稱' npm start
 
 - `OPENAI_MODEL`：帳目辨識模型，預設 `gpt-5.6`
 - `OPENAI_BASE_URL`：選填的相容 Responses API 端點；未設定時使用 OpenAI 官方端點
+- `OPENAI_API_KEY_FILE`：選填的純文字或 JSON 金鑰檔案；`OPENAI_API_KEY` 未設定時使用
 - `OPENAI_TIMEOUT_MS`：單次 AI 請求逾時，預設 30 秒
 - `AI_REQUESTS_PER_HOUR`：每個來源 IP 每小時上限，預設 30 次
 
