@@ -234,6 +234,18 @@ test('local parser preserves description words and extracts a trailing note', ()
   assert.equal(ambiguous.splitMode, 'none');
   assert.deepEqual(ambiguous.participantIds, ['me']);
   assert.match(ambiguous.warnings.join(' '), /未說明如何分攤/);
+
+  for (const [structuredText, expected] of [
+    ['項目：晚餐，金額：500，付款人：我，分帳：我、小明', '晚餐'],
+    ['金額2400 品項旅館 分類住宿 付款人小明 分攤我、小明', '旅館'],
+    ['用途：機場接送；總額 900；我跟小明均分', '機場接送'],
+  ]) {
+    const structured = normalizeDraft(
+      localParse(structuredText, { ...context, today: '2026-07-14', hasReceipt: false }),
+      { ...context, today: '2026-07-14', sourceText: structuredText }
+    );
+    assert.equal(structured.description, expected, structuredText);
+  }
 });
 
 test('local parser handles common payer, transfer, date, category, and total phrasing', () => {
