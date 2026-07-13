@@ -1489,6 +1489,8 @@ function compressImage(file) {
         canvas.height = Math.round(img.height * scale);
         const context = canvas.getContext('2d');
         if (!context) throw new Error('這個瀏覽器無法處理圖片');
+        context.fillStyle = '#fff';
+        context.fillRect(0, 0, canvas.width, canvas.height);
         context.drawImage(img, 0, 0, canvas.width, canvas.height);
         const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
         if (!dataUrl.startsWith('data:image/jpeg;base64,')) {
