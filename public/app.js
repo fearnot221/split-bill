@@ -926,6 +926,9 @@ function applyAiDraft(result) {
   const { draft } = result;
   openExpenseModal();
   aiDraftActive = true;
+  modalReturnFocus = $('#smart-input');
+  expenseSubmitLabel = '確認並儲存';
+  $('.modal-actions button[type="submit"]').textContent = expenseSubmitLabel;
 
   $('#exp-desc').value = draft.description || '';
   $('#exp-amount').value = draft.amount ?? '';
@@ -1105,6 +1108,7 @@ let expenseSubmitting = false;
 let expensePersisted = false;
 let expenseFormBaseline = '';
 let modalReturnFocus = null;
+let expenseSubmitLabel = '儲存';
 
 function expenseDraftSignature() {
   return JSON.stringify({
@@ -1136,7 +1140,7 @@ function setExpenseSubmitting(submitting, pendingLabel = '儲存中…') {
   $$('#modal-expense button, #modal-expense input, #modal-expense select, #modal-expense textarea')
     .forEach((control) => { control.disabled = submitting; });
   const button = $('.modal-actions button[type="submit"]');
-  button.textContent = submitting ? pendingLabel : '儲存';
+  button.textContent = submitting ? pendingLabel : expenseSubmitLabel;
   $('.modal-card').setAttribute('aria-busy', String(submitting));
 }
 
@@ -1148,7 +1152,7 @@ function setKind(kind) {
   $('#kind-transfer').classList.toggle('active', isTr);
   $('#label-payer').firstChild.textContent =
     isTr ? '匯款人' : kind === 'income' ? '收款人' : '付款人';
-  $('#modal-title').textContent = (state.editingId ? '編輯' : '新增') +
+  $('#modal-title').textContent = (aiDraftActive ? '確認' : state.editingId ? '編輯' : '新增') +
     (isTr ? '轉帳' : kind === 'income' ? '收入' : '支出');
 
   // 轉帳模式：隱藏分類與分攤，改成選收款對象；說明改為選填
@@ -1204,6 +1208,8 @@ function setSplitMode(mode) {
 function openExpenseModal(expense = null) {
   if (expenseSubmitting) return;
   aiDraftActive = false;
+  expenseSubmitLabel = '儲存';
+  $('.modal-actions button[type="submit"]').textContent = expenseSubmitLabel;
   $('#ai-review').classList.add('hidden');
   $('#ai-review-warnings').replaceChildren();
   modalReturnFocus = document.activeElement;
