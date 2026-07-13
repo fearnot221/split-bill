@@ -73,6 +73,40 @@ test('local parser identifies a transfer target', () => {
   assert.deepEqual(draft.participantIds, []);
 });
 
+test('local parser keeps dates and times out of the amount', () => {
+  const cases = [
+    ['2026-07-10 住宿 2400 我和小明均分', 2400, '2026-07-10', '住宿'],
+    ['2026年7月10日 晚餐 500 我付不分攤', 500, '2026-07-10', '晚餐'],
+    ['18:30 晚餐 700 我和小明均分', 700, '2026-07-14', '晚餐'],
+  ];
+  for (const [text, amount, date, description] of cases) {
+    const raw = localParse(text, { ...context, today: '2026-07-14', hasReceipt: false });
+    const draft = normalizeDraft(raw, { ...context, today: '2026-07-14', sourceText: text });
+    assert.equal(draft.amount, amount, text);
+    assert.equal(draft.expenseDate, date, text);
+    assert.equal(draft.description, description, text);
+  }
+});
+
+test('local parser handles everyone, income, and no-split phrases', () => {
+  const everyoneText = '晚餐 1,500 大家均分我付';
+  const everyone = normalizeDraft(
+    localParse(everyoneText, { ...context, today: '2026-07-14', hasReceipt: false }),
+    { ...context, today: '2026-07-14', sourceText: everyoneText }
+  );
+  assert.deepEqual(everyone.participantIds, ['me', 'ming']);
+  assert.equal(everyone.splitMode, 'equal');
+
+  const incomeText = '退款收入 500 我收款不分攤';
+  const income = normalizeDraft(
+    localParse(incomeText, { ...context, today: '2026-07-14', hasReceipt: false }),
+    { ...context, today: '2026-07-14', sourceText: incomeText }
+  );
+  assert.equal(income.kind, 'income');
+  assert.equal(income.splitMode, 'none');
+  assert.deepEqual(income.participantIds, ['me']);
+});
+
 test('normalizer rejects unknown members and unsafe custom totals', () => {
   const draft = normalizeDraft({
     isLedgerEntry: true,

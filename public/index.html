@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="theme-color" content="#f5f3ee">
   <title>分帳小工具 — 記帳分帳</title>
-  <link rel="stylesheet" href="style.css?v=15">
+  <link rel="stylesheet" href="style.css?v=16">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%2344705a'/><text x='50' y='72' font-size='60' text-anchor='middle' fill='white' font-family='Helvetica,Arial,sans-serif' font-weight='bold'>$</text></svg>">
 </head>
 <body>
@@ -57,6 +57,10 @@
           </div>
           <div class="smart-actions">
             <input type="file" id="smart-receipt-file" accept="image/*" class="hidden">
+            <button type="button" id="btn-smart-voice" class="icon-btn smart-voice hidden"
+              aria-label="語音輸入" aria-pressed="false" title="語音輸入">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><path d="M12 17v5"/><path d="M8 22h8"/></svg>
+            </button>
             <button type="button" id="btn-smart-receipt" class="btn btn-secondary btn-sm">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h3l2-3h6l2 3h3a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2Z"/><circle cx="12" cy="13" r="4"/></svg>
               <span>附上單據</span>
@@ -67,6 +71,10 @@
             </button>
           </div>
           <p id="smart-feedback" class="smart-feedback" role="status" aria-live="polite"></p>
+          <div id="smart-recents" class="smart-recents hidden">
+            <span>最近</span>
+            <div id="smart-recent-list"></div>
+          </div>
           <p class="smart-privacy">啟用 AI 時，這次輸入的文字與單據會傳送至 OpenAI 進行分析。</p>
         </section>
         <div class="filter-bar">
@@ -235,14 +243,16 @@
             <button type="button" id="btn-receipt-remove" class="btn btn-ghost btn-sm danger hidden">移除</button>
           </div>
         </div>
-        <button type="submit" class="btn btn-primary">儲存</button>
-        <button type="button" id="btn-delete-expense" class="btn btn-ghost danger hidden">刪除這筆紀錄</button>
       </form>
+      <div class="modal-actions">
+        <button type="submit" form="form-expense" class="btn btn-primary">儲存</button>
+        <button type="button" id="btn-delete-expense" class="btn btn-ghost danger hidden">刪除</button>
+      </div>
     </div>
   </div>
 
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
-  <script src="app.js?v=19"></script>
+  <script src="app.js?v=20"></script>
 </body>
 </html>

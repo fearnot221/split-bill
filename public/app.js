@@ -58,6 +58,10 @@ let smartReceiptDataUrl = null;
 let smartReceiptName = '';
 let smartAnalyzing = false;
 let aiDraftActive = false;
+let smartPersistTimer = null;
+let smartDraftRestored = false;
+let smartDbPromise = null;
+let smartSpeechRecognition = null;
 
 /* ===== 工具 ===== */
 function fmt(n) {
@@ -225,6 +229,7 @@ function renderAll() {
   renderBalances(members, balances);
   renderSettlements(settlements);
   renderStats();
+  renderSmartRecents(expenses);
 }
 
 /* ===== 支出列表（含搜尋 / 分類篩選） ===== */
@@ -635,9 +640,14 @@ function setSmartFeedback(message, error = false) {
 
 function setSmartAnalyzing(analyzing) {
   smartAnalyzing = analyzing;
+  if (analyzing && smartSpeechRecognition
+    && $('#btn-smart-voice').getAttribute('aria-pressed') === 'true') {
+    smartSpeechRecognition.abort();
+  }
   $('#smart-entry-title').closest('.smart-entry').setAttribute('aria-busy', String(analyzing));
   $('#smart-input').disabled = analyzing;
   $('#btn-smart-receipt').disabled = analyzing;
+  $('#btn-smart-voice').disabled = analyzing;
   $('#btn-smart-receipt-remove').disabled = analyzing;
   $('#btn-smart-analyze').disabled = analyzing;
   const label = $('#btn-smart-analyze span');
@@ -664,6 +674,7 @@ async function setSmartReceiptFile(file) {
   smartReceiptDataUrl = await compressImage(file);
   smartReceiptName = file.name || '貼上的單據';
   renderSmartReceipt();
+  scheduleSmartDraftPersist();
   setSmartFeedback(state.aiStatus?.receiptRecognition
     ? '單據已附上，可以開始分析'
     : '單據已附上；目前只會保留圖片，尚未啟用影像辨識');
@@ -674,7 +685,7 @@ async function loadAiStatus() {
   state.aiStatus = status;
   $('#smart-mode').textContent = status.mode === 'openai' ? 'AI 單據辨識' : '基本文字解析';
   $('#btn-smart-analyze').disabled = false;
-  if (status.mode !== 'openai') {
+  if (status.mode !== 'openai' && !$('#smart-input').value && !smartReceiptDataUrl) {
     setSmartFeedback('尚未設定 AI 金鑰，仍可使用基本文字解析');
   }
 }
@@ -686,8 +697,183 @@ function clearSmartEntry() {
   smartReceiptName = '';
   aiDraftActive = false;
   renderSmartReceipt();
+  clearTimeout(smartPersistTimer);
+  deleteSmartDraft().catch(() => {});
   setSmartFeedback('帳目已儲存');
 }
+
+function getSmartDraftDb() {
+  if (!('indexedDB' in window)) return Promise.reject(new Error('IndexedDB unavailable'));
+  if (smartDbPromise) return smartDbPromise;
+  smartDbPromise = new Promise((resolve, reject) => {
+    const request = indexedDB.open('split-bill-local', 1);
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains('smart-drafts')) {
+        request.result.createObjectStore('smart-drafts');
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error('Cannot open draft database'));
+  });
+  return smartDbPromise;
+}
+
+async function writeSmartDraft() {
+  if (!state.groupId) return;
+  const text = $('#smart-input').value;
+  if (!text && !smartReceiptDataUrl) return deleteSmartDraft();
+  const db = await getSmartDraftDb();
+  await new Promise((resolve, reject) => {
+    const transaction = db.transaction('smart-drafts', 'readwrite');
+    transaction.objectStore('smart-drafts').put({
+      text,
+      receiptDataUrl: smartReceiptDataUrl,
+      receiptName: smartReceiptName,
+      updatedAt: new Date().toISOString(),
+    }, state.groupId);
+    transaction.oncomplete = resolve;
+    transaction.onerror = () => reject(transaction.error || new Error('Cannot save draft'));
+    transaction.onabort = () => reject(transaction.error || new Error('Cannot save draft'));
+  });
+}
+
+async function readSmartDraft() {
+  if (!state.groupId) return null;
+  const db = await getSmartDraftDb();
+  return new Promise((resolve, reject) => {
+    const request = db.transaction('smart-drafts').objectStore('smart-drafts').get(state.groupId);
+    request.onsuccess = () => resolve(request.result || null);
+    request.onerror = () => reject(request.error || new Error('Cannot read draft'));
+  });
+}
+
+async function deleteSmartDraft() {
+  if (!state.groupId || !('indexedDB' in window)) return;
+  const db = await getSmartDraftDb();
+  await new Promise((resolve, reject) => {
+    const transaction = db.transaction('smart-drafts', 'readwrite');
+    transaction.objectStore('smart-drafts').delete(state.groupId);
+    transaction.oncomplete = resolve;
+    transaction.onerror = () => reject(transaction.error || new Error('Cannot delete draft'));
+  });
+}
+
+function scheduleSmartDraftPersist() {
+  clearTimeout(smartPersistTimer);
+  smartPersistTimer = setTimeout(() => writeSmartDraft().catch(() => {}), 250);
+}
+
+async function restoreSmartDraft() {
+  if (smartDraftRestored) return;
+  smartDraftRestored = true;
+  try {
+    const draft = await readSmartDraft();
+    if (!draft || $('#smart-input').value || smartReceiptDataUrl) return;
+    $('#smart-input').value = typeof draft.text === 'string' ? draft.text : '';
+    smartReceiptDataUrl = typeof draft.receiptDataUrl === 'string' ? draft.receiptDataUrl : null;
+    smartReceiptName = typeof draft.receiptName === 'string' ? draft.receiptName : '';
+    renderSmartReceipt();
+    setSmartFeedback('已復原尚未儲存的記帳草稿');
+  } catch {}
+}
+
+function setupSmartSpeechInput() {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) return;
+  const button = $('#btn-smart-voice');
+  button.classList.remove('hidden');
+  const recognition = new SpeechRecognition();
+  smartSpeechRecognition = recognition;
+  recognition.lang = 'zh-TW';
+  recognition.interimResults = true;
+  recognition.continuous = false;
+  recognition.onstart = () => {
+    button.setAttribute('aria-pressed', 'true');
+    setSmartFeedback('正在聽取記帳內容…');
+  };
+  recognition.onresult = (event) => {
+    let finalText = '';
+    let interimText = '';
+    for (let index = event.resultIndex; index < event.results.length; index += 1) {
+      const transcript = event.results[index][0]?.transcript || '';
+      if (event.results[index].isFinal) finalText += transcript;
+      else interimText += transcript;
+    }
+    if (finalText) {
+      const input = $('#smart-input');
+      input.value = `${input.value}${input.value.trim() ? '。' : ''}${finalText}`;
+      scheduleSmartDraftPersist();
+    }
+    if (interimText) setSmartFeedback(`聽到：${interimText}`);
+  };
+  recognition.onerror = (event) => {
+    const message = event.error === 'not-allowed'
+      ? '麥克風權限未開啟'
+      : event.error === 'no-speech' ? '沒有聽到語音，請再試一次' : '語音辨識失敗';
+    setSmartFeedback(message, true);
+  };
+  recognition.onend = () => button.setAttribute('aria-pressed', 'false');
+  button.addEventListener('click', () => {
+    if (button.getAttribute('aria-pressed') === 'true') recognition.stop();
+    else {
+      try { recognition.start(); } catch {}
+    }
+  });
+}
+
+function buildRepeatText(expense) {
+  const income = isIncome(expense);
+  const payer = memberName(expense.payer_id);
+  let text = `${income ? '收入 ' : ''}${expense.description} ${expense.amount}`;
+  if (expense.category && expense.category !== '其他') text += `，分類${expense.category}`;
+  text += `，${payer}${income ? '收款' : '付'}`;
+  const splits = expense.splits || [];
+  const selfOnly = splits.length === 1
+    && splits[0].member_id === expense.payer_id
+    && Math.abs(splits[0].amount - expense.amount) < 0.011;
+  if (selfOnly) return `${text}，不分攤`;
+  const shares = equalSplit(expense.amount, splits.length);
+  const equal = splits.length > 0
+    && splits.every((split, index) => Math.abs(split.amount - shares[index]) < 0.011);
+  if (equal) return `${text}，${splits.map((split) => memberName(split.member_id)).join('、')}均分`;
+  if (splits.length) {
+    return `${text}，${splits.map((split) => `${memberName(split.member_id)}${split.amount}`).join('、')}`;
+  }
+  return text;
+}
+
+function renderSmartRecents(expenses) {
+  const recent = [];
+  const seen = new Set();
+  for (const expense of expenses) {
+    if (isTransfer(expense)) continue;
+    const key = `${expense.kind}\u0000${expense.description}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    recent.push(expense);
+    if (recent.length === 3) break;
+  }
+  $('#smart-recents').classList.toggle('hidden', recent.length === 0);
+  const list = $('#smart-recent-list');
+  const signature = JSON.stringify(recent.map((expense) => [expense.id, expense.version]));
+  if (list.dataset.signature === signature) return;
+  list.dataset.signature = signature;
+  list.innerHTML = recent.map((expense) => `
+    <button type="button" class="pill-btn smart-recent" data-id="${expense.id}"
+      title="再記一筆 ${escapeHtml(expense.description)}">↻ ${escapeHtml(expense.description)}</button>
+  `).join('');
+}
+
+$('#smart-recent-list').addEventListener('click', (ev) => {
+  const button = ev.target.closest('.smart-recent');
+  if (!button) return;
+  const expense = state.data?.expenses.find((item) => item.id === button.dataset.id);
+  if (!expense) return;
+  $('#smart-input').value = buildRepeatText(expense);
+  scheduleSmartDraftPersist();
+  setSmartFeedback('已帶入最近紀錄，可直接分析或修改');
+  $('#smart-input').focus();
+});
 
 function showAiReview(result) {
   const { draft } = result;
@@ -788,6 +974,7 @@ $('#btn-smart-receipt-remove').addEventListener('click', () => {
   smartReceiptDataUrl = null;
   smartReceiptName = '';
   renderSmartReceipt();
+  scheduleSmartDraftPersist();
   setSmartFeedback('');
 });
 $('#btn-smart-analyze').addEventListener('click', analyzeSmartEntry);
@@ -797,10 +984,12 @@ $('#smart-input').addEventListener('keydown', (ev) => {
     analyzeSmartEntry();
   }
 });
+$('#smart-input').addEventListener('input', scheduleSmartDraftPersist);
 $('#smart-input').addEventListener('paste', (ev) => {
   const image = [...(ev.clipboardData?.files || [])].find((file) => file.type.startsWith('image/'));
   if (image) setSmartReceiptFile(image).catch((error) => setSmartFeedback(error.message, true));
 });
+setupSmartSpeechInput();
 
 /* ===== 統計操作 ===== */
 function setStatsRange(from, to) {
@@ -876,7 +1065,7 @@ function setExpenseSubmitting(submitting, pendingLabel = '儲存中…') {
   expenseSubmitting = submitting;
   $$('#modal-expense button, #modal-expense input, #modal-expense select, #modal-expense textarea')
     .forEach((control) => { control.disabled = submitting; });
-  const button = $('#form-expense button[type="submit"]');
+  const button = $('.modal-actions button[type="submit"]');
   button.textContent = submitting ? pendingLabel : '儲存';
   $('.modal-card').setAttribute('aria-busy', String(submitting));
 }
@@ -1396,6 +1585,7 @@ async function initialize() {
       state.memberId = me.memberId;
     }
     await refresh();
+    await restoreSmartDraft();
     loadAiStatus().catch(() => {
       $('#smart-mode').textContent = '狀態未知';
       $('#btn-smart-analyze').disabled = false;
@@ -1424,5 +1614,6 @@ window.addEventListener('online', () => initialize());
 initialize();
 
 document.addEventListener('visibilitychange', () => {
+  if (document.hidden) writeSmartDraft().catch(() => {});
   if (canPoll()) refresh({ poll: true }).catch(() => {});
 });
