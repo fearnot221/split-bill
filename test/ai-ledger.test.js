@@ -161,6 +161,7 @@ test('local parser understands guarded Chinese money amounts', () => {
     ['晚餐五百元我跟小明均分', 500, '晚餐'],
     ['兩千四百塊旅館，我跟小明均分', 2400, '旅館'],
     ['總共一萬零五十，住宿，我付不分攤', 10050, '住宿'],
+    ['總共五百元晚餐，我付不分攤', 500, '晚餐'],
   ];
   for (const [text, amount, description] of cases) {
     const draft = normalizeDraft(
