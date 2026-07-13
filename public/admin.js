@@ -113,7 +113,7 @@ function renderAiUsage() {
       <strong>${value}</strong>
     </div>`).join('');
   $('#ai-token-summary').textContent = usage.openai_requests
-    ? `OpenAI ${usage.openai_requests.toLocaleString()} 次｜輸入 ${usage.input_tokens.toLocaleString()} tokens（快取 ${usage.cached_input_tokens.toLocaleString()}）｜輸出 ${usage.output_tokens.toLocaleString()} tokens`
+    ? `AI 服務 ${usage.openai_requests.toLocaleString()} 次｜輸入 ${usage.input_tokens.toLocaleString()} tokens（快取 ${usage.cached_input_tokens.toLocaleString()}）｜輸出 ${usage.output_tokens.toLocaleString()} tokens`
     : `目前皆為本機基本解析，共 ${usage.local_requests.toLocaleString()} 次；未使用 AI tokens。`;
 
   const errorNames = {
