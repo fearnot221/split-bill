@@ -14,6 +14,7 @@ const {
   localParse,
   normalizeDraft,
 } = require('./lib/ai-ledger');
+const { bindClientAbort } = require('./lib/request-abort');
 
 const app = express();
 const positiveIntegerEnv = (value, fallback) => {
@@ -459,9 +460,9 @@ app.post('/api/groups/:id/ai/parse', async (req, res) => {
     return res.status(429).json({ error: '智慧分析次數已達上限，請稍後再試' });
   }
 
+  const clientAbort = bindClientAbort(req, res);
+
   try {
-    const abortController = new AbortController();
-    req.once('aborted', () => abortController.abort());
     const result = await analyzeWithOpenAI({
       client: openai,
       model: OPENAI_MODEL,
@@ -470,7 +471,7 @@ app.post('/api/groups/:id/ai/parse', async (req, res) => {
       context,
       today,
       safetyIdentifier: `ledger_${sha256(req.params.id).slice(0, 32)}`,
-      signal: abortController.signal,
+      signal: clientAbort.controller.signal,
     });
     recordAiUsage({
       provider: 'openai', model: OPENAI_MODEL, hasReceipt: !!receiptDataUrl,
@@ -480,12 +481,13 @@ app.post('/api/groups/:id/ai/parse', async (req, res) => {
       provider: 'openai', model: OPENAI_MODEL, draft: result.draft, notices: [],
     });
   } catch (error) {
+    const cancelled = clientAbort.controller.signal.aborted;
     recordAiUsage({
       provider: 'openai', model: OPENAI_MODEL, hasReceipt: !!receiptDataUrl,
       success: false, startedAt, usage: error.aiUsage,
-      errorCode: classifyAiError(error, req.aborted),
+      errorCode: classifyAiError(error, cancelled),
     });
-    if (req.aborted) return;
+    if (cancelled) return;
     const status = Number(error?.status);
     console.error('AI 帳目分析失敗:', status || '', error?.message || error);
     if (status === 429) return res.status(429).json({ error: 'AI 服務目前忙碌，請稍後再試' });
@@ -496,6 +498,8 @@ app.post('/api/groups/:id/ai/parse', async (req, res) => {
       return res.status(422).json({ error: error.message });
     }
     return res.status(502).json({ error: 'AI 帳目分析失敗，請稍後再試' });
+  } finally {
+    clientAbort.cleanup();
   }
 });
 

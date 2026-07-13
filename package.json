@@ -11,7 +11,7 @@
     "dev": "node --watch server.js",
     "backup": "node scripts/backup.js",
     "test": "node --test",
-    "check": "node --check server.js && node --check db.js && node --check lib/ledger.js && node --check lib/ai-ledger.js && node --check public/app.js && node --check public/admin.js && node --check scripts/backup.js",
+    "check": "node --check server.js && node --check db.js && node --check lib/ledger.js && node --check lib/ai-ledger.js && node --check lib/request-abort.js && node --check public/app.js && node --check public/admin.js && node --check scripts/backup.js",
     "verify": "npm run check && npm test"
   },
   "dependencies": {
