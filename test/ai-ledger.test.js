@@ -62,6 +62,36 @@ test('local parser preserves valid custom splits', () => {
   ]);
 });
 
+test('local parser converts percentage splits into exact currency amounts', () => {
+  const text = '晚餐 999，我70%、小明30%，我付';
+  const draft = normalizeDraft(
+    localParse(text, { ...context, today: '2026-07-14', hasReceipt: false }),
+    { ...context, today: '2026-07-14', sourceText: text }
+  );
+  assert.equal(draft.amount, 999);
+  assert.equal(draft.splitMode, 'custom');
+  assert.deepEqual(draft.customSplits, [
+    { memberId: 'me', memberName: '我', amount: 699.3 },
+    { memberId: 'ming', memberName: '小明', amount: 299.7 },
+  ]);
+
+  const invalidText = '晚餐 999，我60%、小明30%，我付';
+  const invalid = normalizeDraft(
+    localParse(invalidText, { ...context, today: '2026-07-14', hasReceipt: false }),
+    { ...context, today: '2026-07-14', sourceText: invalidText }
+  );
+  assert.equal(invalid.splitMode, 'equal');
+  assert.match(invalid.warnings.join(' '), /100%/);
+
+  const missingTotalText = '晚餐，我70%、小明30%';
+  const missingTotal = normalizeDraft(
+    localParse(missingTotalText, { ...context, today: '2026-07-14', hasReceipt: false }),
+    { ...context, today: '2026-07-14', sourceText: missingTotalText }
+  );
+  assert.equal(missingTotal.amount, null);
+  assert.match(missingTotal.warnings.join(' '), /總金額/);
+});
+
 test('local parser identifies a transfer target', () => {
   const text = '我轉帳 500 給小明';
   const raw = localParse(text, { ...context, today: '2026-07-14', hasReceipt: false });
