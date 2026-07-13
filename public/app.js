@@ -533,7 +533,8 @@ function replayStatsBars() {
 
 /* ===== 分類 chips（清單來自帳本資料，可自訂新增） ===== */
 const chipHtml = (cat, active) =>
-  `<button type="button" class="chip${active ? ' active' : ''}" data-cat="${escapeHtml(cat)}"><span>${escapeHtml(cat)}</span></button>`;
+  `<button type="button" class="chip${active ? ' active' : ''}" data-cat="${escapeHtml(cat)}"
+    aria-pressed="${active ? 'true' : 'false'}"><span>${escapeHtml(cat)}</span></button>`;
 
 function renderFilterChips() {
   // 只有實際出現過的轉帳類別才顯示快篩 chip
@@ -558,7 +559,9 @@ function renderFilterChips() {
     });
   }
   row.querySelectorAll('.chip').forEach((chip) => {
-    chip.classList.toggle('active', chip.dataset.cat === state.filterCat);
+    const active = chip.dataset.cat === state.filterCat;
+    chip.classList.toggle('active', active);
+    chip.setAttribute('aria-pressed', String(active));
   });
 }
 
@@ -568,7 +571,11 @@ function renderModalCats(selected) {
     + '<button type="button" class="chip chip-add"><span>＋ 新類別</span></button>';
   row.querySelectorAll('.chip:not(.chip-add)').forEach((chip) => {
     chip.addEventListener('click', () => {
-      row.querySelectorAll('.chip:not(.chip-add)').forEach((c) => c.classList.toggle('active', c === chip));
+      row.querySelectorAll('.chip:not(.chip-add)').forEach((category) => {
+        const active = category === chip;
+        category.classList.toggle('active', active);
+        category.setAttribute('aria-pressed', String(active));
+      });
     });
   });
   row.querySelector('.chip-add').addEventListener('click', async () => {
