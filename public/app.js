@@ -63,6 +63,8 @@ let smartDraftRestored = false;
 let smartDbPromise = null;
 let smartSpeechRecognition = null;
 let smartAnalyzeController = null;
+let smartReceiptTask = null;
+let smartReceiptSequence = 0;
 
 /* ===== 工具 ===== */
 function fmt(n) {
@@ -656,9 +658,9 @@ function setSmartAnalyzing(analyzing) {
   $('#btn-smart-receipt').disabled = analyzing;
   $('#btn-smart-voice').disabled = analyzing;
   $('#btn-smart-receipt-remove').disabled = analyzing;
-  $('#btn-smart-analyze').disabled = false;
+  $('#btn-smart-analyze').disabled = !!smartReceiptTask && !analyzing;
   const label = $('#btn-smart-analyze span');
-  label.textContent = analyzing ? '取消分析' : '分析帳目';
+  label.textContent = analyzing ? '取消分析' : smartReceiptTask ? '處理單據…' : '分析帳目';
   $('#btn-smart-analyze').classList.toggle('analyzing', analyzing);
   if (analyzing) setSmartFeedback('正在整理金額、成員與分攤方式…');
 }
@@ -679,13 +681,31 @@ async function setSmartReceiptFile(file) {
   if (!file) return;
   if (!file.type.startsWith('image/')) throw new Error('請選擇圖片檔案');
   if (file.size > 25 * 1024 * 1024) throw new Error('圖片過大（原始檔上限 25MB）');
-  smartReceiptDataUrl = await compressImage(file);
-  smartReceiptName = file.name || '貼上的單據';
-  renderSmartReceipt();
-  scheduleSmartDraftPersist();
-  setSmartFeedback(state.aiStatus?.receiptRecognition
-    ? '單據已附上，可以開始分析'
-    : '單據已附上；目前只會保留圖片，尚未啟用影像辨識');
+  const sequence = ++smartReceiptSequence;
+  const task = compressImage(file);
+  smartReceiptTask = task;
+  $('#btn-smart-analyze').disabled = true;
+  $('#btn-smart-analyze span').textContent = '處理單據…';
+  setSmartFeedback('正在準備單據圖片…');
+  try {
+    const dataUrl = await task;
+    if (sequence !== smartReceiptSequence) return;
+    smartReceiptDataUrl = dataUrl;
+    smartReceiptName = file.name || '貼上的單據';
+    renderSmartReceipt();
+    scheduleSmartDraftPersist();
+    setSmartFeedback(state.aiStatus?.receiptRecognition
+      ? '單據已附上，可以開始分析'
+      : '單據已附上；目前只會保留圖片，尚未啟用影像辨識');
+  } catch (error) {
+    if (sequence === smartReceiptSequence) throw error;
+  } finally {
+    if (sequence === smartReceiptSequence) {
+      smartReceiptTask = null;
+      $('#btn-smart-analyze').disabled = false;
+      $('#btn-smart-analyze span').textContent = '分析帳目';
+    }
+  }
 }
 
 async function loadAiStatus() {
@@ -703,6 +723,8 @@ function clearSmartEntry() {
   $('#smart-receipt-file').value = '';
   smartReceiptDataUrl = null;
   smartReceiptName = '';
+  smartReceiptSequence += 1;
+  smartReceiptTask = null;
   aiDraftActive = false;
   renderSmartReceipt();
   clearTimeout(smartPersistTimer);
@@ -944,6 +966,15 @@ async function analyzeSmartEntry() {
     smartAnalyzeController?.abort();
     return;
   }
+  if (smartReceiptTask) {
+    setSmartFeedback('正在準備單據圖片…');
+    try {
+      await smartReceiptTask;
+    } catch (error) {
+      setSmartFeedback(error.message, true);
+      return;
+    }
+  }
   const text = $('#smart-input').value.trim();
   if (!text && !smartReceiptDataUrl) {
     setSmartFeedback('請輸入記帳內容或附上單據', true);
@@ -985,8 +1016,12 @@ $('#smart-receipt-file').addEventListener('change', async (ev) => {
   ev.target.value = '';
 });
 $('#btn-smart-receipt-remove').addEventListener('click', () => {
+  smartReceiptSequence += 1;
+  smartReceiptTask = null;
   smartReceiptDataUrl = null;
   smartReceiptName = '';
+  $('#btn-smart-analyze').disabled = false;
+  $('#btn-smart-analyze span').textContent = '分析帳目';
   renderSmartReceipt();
   scheduleSmartDraftPersist();
   setSmartFeedback('');
@@ -1002,6 +1037,27 @@ $('#smart-input').addEventListener('input', scheduleSmartDraftPersist);
 $('#smart-input').addEventListener('paste', (ev) => {
   const image = [...(ev.clipboardData?.files || [])].find((file) => file.type.startsWith('image/'));
   if (image) setSmartReceiptFile(image).catch((error) => setSmartFeedback(error.message, true));
+});
+const smartEntry = $('#smart-entry-title').closest('.smart-entry');
+smartEntry.addEventListener('dragover', (ev) => {
+  if (![...(ev.dataTransfer?.types || [])].includes('Files')) return;
+  ev.preventDefault();
+  ev.dataTransfer.dropEffect = 'copy';
+  smartEntry.classList.add('dragging');
+});
+smartEntry.addEventListener('dragleave', (ev) => {
+  if (!smartEntry.contains(ev.relatedTarget)) smartEntry.classList.remove('dragging');
+});
+smartEntry.addEventListener('drop', (ev) => {
+  smartEntry.classList.remove('dragging');
+  if (![...(ev.dataTransfer?.types || [])].includes('Files')) return;
+  ev.preventDefault();
+  const image = [...(ev.dataTransfer?.files || [])].find((file) => file.type.startsWith('image/'));
+  if (!image) {
+    setSmartFeedback('請拖入圖片格式的單據', true);
+    return;
+  }
+  setSmartReceiptFile(image).catch((error) => setSmartFeedback(error.message, true));
 });
 setupSmartSpeechInput();
 
