@@ -137,6 +137,10 @@ test('local parser keeps dates and times out of the amount', () => {
     ['18:30 晚餐 700 我和小明均分', 700, '2026-07-14', '晚餐'],
     ['7/10晚餐500我付不分攤', 500, '2026-07-10', '晚餐'],
     ['18:30晚餐700我和小明均分', 700, '2026-07-14', '晚餐'],
+    ['7月10日晚餐500我付不分攤', 500, '2026-07-10', '晚餐'],
+    ['7月10號晚餐500我付不分攤', 500, '2026-07-10', '晚餐'],
+    ['明天早餐80我付不分攤', 80, '2026-07-15', '早餐'],
+    ['後天晚餐500我付不分攤', 500, '2026-07-16', '晚餐'],
   ];
   for (const [text, amount, date, description] of cases) {
     const raw = localParse(text, { ...context, today: '2026-07-14', hasReceipt: false });
@@ -155,7 +159,7 @@ test('local parser keeps dates and times out of the amount', () => {
     assert.match(draft.warnings.join(' '), /尚未辨識金額/, invalidPrecision);
   }
 
-  for (const invalidDate of ['2026-02-30晚餐500我付', '2/30晚餐500我付']) {
+  for (const invalidDate of ['2026-02-30晚餐500我付', '2/30晚餐500我付', '2月30日晚餐500我付']) {
     const draft = normalizeDraft(
       localParse(invalidDate, { ...context, today: '2026-07-14', hasReceipt: false }),
       { ...context, today: '2026-07-14', sourceText: invalidDate }
