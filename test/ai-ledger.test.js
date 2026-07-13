@@ -388,6 +388,8 @@ test('builds a private multimodal Responses API request', () => {
   assert.equal(request.model, 'gpt-5.6');
   assert.equal(request.store, false);
   assert.equal(request.safety_identifier, 'ledger_test');
+  assert.equal(request.max_output_tokens, 2000);
+  assert.match(request.instructions, /最終應付／實付總額/);
   assert.equal(request.input[0].content[1].type, 'input_image');
   assert.equal(request.input[0].content[1].detail, 'high');
   assert.equal(request.text.format.type, 'json_schema');

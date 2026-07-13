@@ -437,6 +437,7 @@ app.post('/api/groups/:id/ai/parse', async (req, res) => {
     return res.status(400).json({ error: '請提供正確的智慧記帳內容' });
   }
   const text = trimmedString(body.text);
+  const safetySessionId = trimmedString(body.safetySessionId);
   if (text.length > 2000) return res.status(400).json({ error: '記帳文字最多 2000 字' });
   const receiptDataUrl = typeof body.receiptDataUrl === 'string' ? body.receiptDataUrl : '';
   if (!text && !receiptDataUrl) return res.status(400).json({ error: '請輸入記帳內容或附上單據' });
@@ -482,7 +483,12 @@ app.post('/api/groups/:id/ai/parse', async (req, res) => {
       receiptDataUrl: receiptDataUrl || null,
       context,
       today,
-      safetyIdentifier: `ledger_${sha256(req.params.id).slice(0, 32)}`,
+      safetyIdentifier: `ledger_${sha256(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+          .test(safetySessionId)
+          ? safetySessionId
+          : req.params.id
+      ).slice(0, 32)}`,
       signal: clientAbort.controller.signal,
     });
     recordAiUsage({

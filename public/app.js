@@ -66,6 +66,7 @@ let smartSpeechRecognition = null;
 let smartAnalyzeController = null;
 let smartReceiptTask = null;
 let smartReceiptSequence = 0;
+let cachedSafetySessionId = null;
 
 /* ===== 工具 ===== */
 function fmt(n) {
@@ -1063,6 +1064,7 @@ async function analyzeSmartEntry() {
         receiptDataUrl: smartReceiptDataUrl,
         defaultMemberId: state.memberId,
         localDate: todayLocal(),
+        safetySessionId: safetySessionId(),
       }),
     });
     if (!result.draft?.isLedgerEntry) {
@@ -1200,6 +1202,21 @@ function newRequestId() {
   bytes[8] = (bytes[8] & 0x3f) | 0x80;
   const hex = [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+function safetySessionId() {
+  if (cachedSafetySessionId) return cachedSafetySessionId;
+  try {
+    const stored = sessionStorage.getItem('split-bill-safety-session');
+    if (/^[0-9a-f-]{36}$/i.test(stored || '')) cachedSafetySessionId = stored;
+    else {
+      cachedSafetySessionId = newRequestId();
+      sessionStorage.setItem('split-bill-safety-session', cachedSafetySessionId);
+    }
+  } catch {
+    cachedSafetySessionId = newRequestId();
+  }
+  return cachedSafetySessionId;
 }
 
 function expenseDraftSignature() {
