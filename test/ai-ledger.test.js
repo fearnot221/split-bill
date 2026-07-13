@@ -288,6 +288,25 @@ test('normalizer rejects unknown members and unsafe custom totals', () => {
   assert.deepEqual(draft.customSplits, []);
   assert.match(draft.warnings.join(' '), /不存在/);
   assert.match(draft.warnings.join(' '), /總額不符/);
+
+  const uncertain = normalizeDraft({
+    isLedgerEntry: true,
+    kind: 'expense',
+    description: '可能是車票',
+    amount: 88,
+    category: '交通',
+    expenseDate: '2026-07-14',
+    payerName: '我',
+    participantNames: ['我'],
+    splitMode: 'none',
+    customSplits: [],
+    transferToName: null,
+    note: null,
+    confidence: 0.4,
+    warnings: [],
+  }, { ...context, today: '2026-07-14', sourceText: '可能是車票' });
+  assert.equal(uncertain.ready, true);
+  assert.match(uncertain.warnings.join(' '), /信心較低/);
 });
 
 test('builds a private multimodal Responses API request', () => {

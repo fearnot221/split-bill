@@ -947,6 +947,7 @@ function aiDraftFocusTarget(draft) {
   if (!draft.amount) return $('#exp-amount');
   if (draft.kind === 'transfer' && !draft.transferToId) return $('#exp-transfer-to');
   const warnings = (draft.warnings || []).join(' ');
+  if (/信心較低/.test(warnings)) return $('#exp-desc');
   if (/日期/.test(warnings)) return $('#exp-date');
   if (/(分攤|成員)/.test(warnings) && draft.kind !== 'transfer') return $('#split-equal');
   if (/(付款|收款)人/.test(warnings)) return $('#exp-payer');
