@@ -221,6 +221,15 @@ test('local parser handles everyone, income, and no-split phrases', () => {
   );
   assert.equal(singleParticipant.splitMode, 'equal');
   assert.deepEqual(singleParticipant.participantIds, ['ming']);
+
+  for (const shorthand of ['晚餐500跟小明均分', '晚餐500小明AA']) {
+    const shared = normalizeDraft(
+      localParse(shorthand, { ...context, today: '2026-07-14', hasReceipt: false }),
+      { ...context, today: '2026-07-14', sourceText: shorthand }
+    );
+    assert.equal(shared.splitMode, 'equal', shorthand);
+    assert.deepEqual(shared.participantIds, ['me', 'ming'], shorthand);
+  }
 });
 
 test('local parser preserves description words and extracts a trailing note', () => {
