@@ -179,6 +179,28 @@ test('local parser preserves description words and extracts a trailing note', ()
     { ...context, today: '2026-07-14', sourceText: commandText }
   );
   assert.equal(command.description, '晚餐');
+
+  for (const [amountFirst, expected] of [
+    ['500元晚餐，我跟小明均分', '晚餐'],
+    ['NT$2400 旅館，由小明支付，我跟小明均分', '旅館'],
+    ['300退款，小明收款，我跟小明均分', '退款'],
+  ]) {
+    const parsed = normalizeDraft(
+      localParse(amountFirst, { ...context, today: '2026-07-14', hasReceipt: false }),
+      { ...context, today: '2026-07-14', sourceText: amountFirst }
+    );
+    assert.equal(parsed.description, expected, amountFirst);
+  }
+
+  const ambiguousText = '500元小明生日蛋糕，我付';
+  const ambiguous = normalizeDraft(
+    localParse(ambiguousText, { ...context, today: '2026-07-14', hasReceipt: false }),
+    { ...context, today: '2026-07-14', sourceText: ambiguousText }
+  );
+  assert.equal(ambiguous.description, '小明生日蛋糕');
+  assert.equal(ambiguous.splitMode, 'none');
+  assert.deepEqual(ambiguous.participantIds, ['me']);
+  assert.match(ambiguous.warnings.join(' '), /未說明如何分攤/);
 });
 
 test('local parser handles common payer, transfer, date, category, and total phrasing', () => {
