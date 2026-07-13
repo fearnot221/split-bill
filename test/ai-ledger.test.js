@@ -226,6 +226,21 @@ test('local parser validates thousands separators', () => {
   }
 });
 
+test('local parser ignores receipt and order identifiers', () => {
+  for (const [text, amount, description] of [
+    ['發票號碼 AB123456，晚餐500我付', 500, '晚餐'],
+    ['統編12345678 旅館2400我付', 2400, '旅館'],
+    ['訂單#998877 車票80我付', 80, '車票'],
+  ]) {
+    const draft = normalizeDraft(
+      localParse(text, { ...context, today: '2026-07-14', hasReceipt: false }),
+      { ...context, today: '2026-07-14', sourceText: text }
+    );
+    assert.equal(draft.amount, amount, text);
+    assert.equal(draft.description, description, text);
+  }
+});
+
 test('local parser handles everyone, income, and no-split phrases', () => {
   const everyoneText = '晚餐 1,500 大家均分我付';
   const everyone = normalizeDraft(
