@@ -88,4 +88,5 @@ test('upgrades an older expenses table with current columns', (t) => {
     WHERE expense_id = 'zero'`).get().total, 0.01);
   assert.ok(db.prepare(`SELECT 1 FROM admin_config
     WHERE key = 'ledger_integrity_cents_v1'`).get());
+  assert.ok(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'ai_usage'").get());
 });

@@ -148,6 +148,14 @@ test('API protects access, validates money, and rejects stale updates', async (t
     assert.equal(parsed.body.draft.expenseDate, '2026-07-13');
     assert.deepEqual(new Set(parsed.body.draft.participantIds), new Set([payerId, memberId]));
 
+    const overview = await request('/api/admin/overview', { admin: true });
+    assert.equal(overview.response.status, 200);
+    assert.equal(overview.body.aiUsage.requests, 1);
+    assert.equal(overview.body.aiUsage.successes, 1);
+    assert.equal(overview.body.aiUsage.local_requests, 1);
+    assert.equal(overview.body.aiUsage.openai_requests, 0);
+    assert.deepEqual(overview.body.aiUsage.errors, {});
+
     const fakeReceipt = await request(`/api/groups/${groupId}/ai/parse`, {
       method: 'POST',
       body: {

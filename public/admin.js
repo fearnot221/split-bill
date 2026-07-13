@@ -90,9 +90,46 @@ async function loadPanel() {
   if (document.activeElement !== nameInput) nameInput.value = overview.group.name;
   const currencyInput = $('#ledger-currency');
   if (document.activeElement !== currencyInput) currencyInput.value = overview.group.currency;
+  renderAiUsage();
   renderMembers();
   renderCats();
   renderTrash();
+}
+
+function renderAiUsage() {
+  const usage = overview.aiUsage;
+  const successRate = usage.requests
+    ? `${Math.round((usage.successes / usage.requests) * 100)}%`
+    : '—';
+  const values = [
+    ['分析次數', usage.requests.toLocaleString()],
+    ['成功率', successRate],
+    ['平均耗時', usage.requests ? `${usage.average_latency_ms.toLocaleString()} ms` : '—'],
+    ['含單據', usage.receipt_requests.toLocaleString()],
+  ];
+  $('#ai-usage-grid').innerHTML = values.map(([label, value]) => `
+    <div class="ai-usage-stat">
+      <span>${label}</span>
+      <strong>${value}</strong>
+    </div>`).join('');
+  $('#ai-token-summary').textContent = usage.openai_requests
+    ? `OpenAI ${usage.openai_requests.toLocaleString()} 次｜輸入 ${usage.input_tokens.toLocaleString()} tokens（快取 ${usage.cached_input_tokens.toLocaleString()}）｜輸出 ${usage.output_tokens.toLocaleString()} tokens`
+    : `目前皆為本機基本解析，共 ${usage.local_requests.toLocaleString()} 次；未使用 AI tokens。`;
+
+  const errorNames = {
+    cancelled: '使用者取消',
+    rate_limit: '次數限制',
+    authentication: '金鑰設定',
+    invalid_output: '回傳格式',
+    request_error: '請求錯誤',
+    upstream_error: '上游服務',
+  };
+  const errors = Object.entries(usage.errors || {});
+  const errorSummary = $('#ai-error-summary');
+  errorSummary.classList.toggle('hidden', errors.length === 0);
+  errorSummary.textContent = errors.length
+    ? `失敗 ${usage.failures.toLocaleString()} 次：${errors.map(([code, count]) => `${errorNames[code] || '其他'} ${count}`).join('、')}`
+    : '';
 }
 
 async function reloadPanel(successMessage) {

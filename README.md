@@ -18,7 +18,8 @@
 - **統計圖表**：以天為單位的日期區間（含近 7 天／近 30 天／本月快選），顯示每日收支、淨額、分類佔比與成員統計
 - **搜尋與篩選**：關鍵字搜尋＋支出／收入／轉帳類型＋分類快篩，即時顯示結果筆數
 - **一句記帳**：輸入自然語言或附上單據，自動整理金額、日期、付款人、分攤成員與類別，確認修改後才寫入帳本
-- **不丟草稿與快速重複**：未儲存的文字與單據保留在瀏覽器 IndexedDB，支援貼上圖片、可用時的中文語音輸入，並可一鍵帶入最近三筆不重複紀錄
+- **不丟草稿與快速重複**：未儲存的文字與單據保留在瀏覽器 IndexedDB，支援選取、拖放或貼上圖片、可用時的中文語音輸入，並可一鍵帶入最近三筆不重複紀錄
+- **可中止的分析流程**：AI 分析中可直接取消；單據壓縮完成前會等待處理，避免送出不完整圖片
 - **單據照片**：記帳時可附上單據，前端自動壓縮後上傳（存於 `uploads/`），列表以迴紋針標示
 - **金額顏色**：支出紅、還款綠，一眼分辨
 - **回收桶**：刪除的支出可從管理面板復原（清空回收桶會連單據檔案一併刪除）
@@ -33,6 +34,7 @@
 - **類別管理**：新增、刪除（「其他」為備援類別、被支出使用中的類別不可刪）
 - **帳本設定**：修改帳本名稱與顯示幣別
 - **回收桶**：主畫面刪除的支出是軟刪除，這裡可復原、永久刪除或一鍵清空
+- **智慧記帳狀態**：近 30 天請求數、成功率、延遲、單據占比與 token 用量聚合
 - **變更密碼**
 
 密碼以 scrypt 雜湊存在 `data.db` 的 `admin_config`；忘記密碼時在伺服器上刪掉該列即可重設：
@@ -82,7 +84,7 @@ OPENAI_MODEL='gpt-5.6' OPENAI_TIMEOUT_MS=30000 AI_REQUESTS_PER_HOUR=30 npm start
 - `OPENAI_TIMEOUT_MS`：單次 AI 請求逾時，預設 30 秒
 - `AI_REQUESTS_PER_HOUR`：每個來源 IP 每小時上限，預設 30 次
 
-沒有設定金鑰時，應用程式會用本地基本規則解析文字，單據仍可附加至帳目，但不會進行影像辨識。AI 模式下，當次文字與單據會傳送至 OpenAI，請求設定 `store: false`；API 金鑰只保留在伺服器端，不會傳到瀏覽器。實作依據 [Responses API](https://developers.openai.com/api/docs/guides/migrate-to-responses)、[Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs) 與 [Images and vision](https://developers.openai.com/api/docs/guides/images-vision) 官方文件。
+沒有設定金鑰時，應用程式會用本地基本規則解析文字，單據仍可附加至帳目，但不會進行影像辨識。AI 模式下，當次文字與單據會傳送至 OpenAI，請求設定 `store: false`；API 金鑰只保留在伺服器端，不會傳到瀏覽器。管理統計只記錄模式、模型、是否含單據、成功狀態、延遲、token 數與粗分類錯誤，不保存文字、圖片、成員、來源 IP 或帳本識別，紀錄自動保留 180 天。實作依據 [Responses API](https://developers.openai.com/api/docs/guides/migrate-to-responses)、[Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs) 與 [Images and vision](https://developers.openai.com/api/docs/guides/images-vision) 官方文件。
 
 ## 備份
 
@@ -140,7 +142,7 @@ npm test
 npm run verify
 ```
 
-測試涵蓋整數分運算、收入／支出／轉帳、1 分錢結算、API 輸入驗證、整站密碼、管理權限、版本衝突與單據格式。
+測試涵蓋整數分運算、收入／支出／轉帳、1 分錢結算、AI 結構化回傳與 token 統計、API 輸入驗證、整站密碼、管理權限、版本衝突與單據格式。
 
 ## 技術架構
 

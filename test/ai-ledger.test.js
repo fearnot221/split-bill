@@ -173,11 +173,16 @@ test('parses and normalizes a structured OpenAI response', async () => {
             warnings: [],
           }),
           output: [],
+          usage: {
+            input_tokens: 120,
+            input_tokens_details: { cached_tokens: 32 },
+            output_tokens: 48,
+          },
         };
       },
     },
   };
-  const draft = await analyzeWithOpenAI({
+  const result = await analyzeWithOpenAI({
     client,
     model: 'gpt-5.6',
     text: '車票88我跟小明',
@@ -187,8 +192,46 @@ test('parses and normalizes a structured OpenAI response', async () => {
     safetyIdentifier: 'ledger_test',
     signal: abortController.signal,
   });
+  const { draft } = result;
   assert.equal(draft.ready, true);
   assert.equal(draft.category, '交通');
   assert.deepEqual(draft.participantIds, ['me', 'ming']);
+  assert.deepEqual(result.usage, {
+    inputTokens: 120,
+    cachedInputTokens: 32,
+    outputTokens: 48,
+  });
   assert.equal(receivedOptions.signal, abortController.signal);
+});
+
+test('preserves token usage when an OpenAI response cannot be parsed', async () => {
+  const client = {
+    responses: {
+      create: async () => ({
+        output_text: '',
+        output: [],
+        usage: { input_tokens: 75, output_tokens: 12 },
+      }),
+    },
+  };
+  await assert.rejects(
+    analyzeWithOpenAI({
+      client,
+      model: 'gpt-5.6',
+      text: '晚餐 300',
+      receiptDataUrl: null,
+      context,
+      today: '2026-07-14',
+      safetyIdentifier: 'ledger_test',
+    }),
+    (error) => {
+      assert.match(error.message, /沒有回傳/);
+      assert.deepEqual(error.aiUsage, {
+        inputTokens: 75,
+        cachedInputTokens: 0,
+        outputTokens: 12,
+      });
+      return true;
+    }
+  );
 });

@@ -6,7 +6,7 @@
   <meta name="robots" content="noindex, nofollow">
   <meta name="theme-color" content="#f5f3ee">
   <title>管理面板 — 分帳小工具</title>
-  <link rel="stylesheet" href="style.css?v=16">
+  <link rel="stylesheet" href="style.css?v=18">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%2344705a'/><text x='50' y='72' font-size='60' text-anchor='middle' fill='white' font-family='Helvetica,Arial,sans-serif' font-weight='bold'>$</text></svg>">
 </head>
 <body>
@@ -34,6 +34,16 @@
 
       <!-- 面板 -->
       <div id="panel" class="hidden">
+        <section class="card">
+          <div class="admin-section-head">
+            <h2>智慧記帳狀態</h2>
+            <span class="member-tag">近 30 天</span>
+          </div>
+          <div id="ai-usage-grid" class="ai-usage-grid"></div>
+          <p id="ai-token-summary" class="hint"></p>
+          <p id="ai-error-summary" class="hint hidden"></p>
+        </section>
+
         <section class="card">
           <h2>成員管理</h2>
           <p class="hint">可改名（帳目會跟著更新）；有帳務紀錄的成員無法刪除。</p>
@@ -94,6 +104,6 @@
 
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
-  <script src="admin.js?v=8"></script>
+  <script src="admin.js?v=9"></script>
 </body>
 </html>

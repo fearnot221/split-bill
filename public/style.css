@@ -982,6 +982,30 @@ select {
 .modal-actions #btn-delete-expense { width: auto; flex-shrink: 0; }
 
 /* ===== 管理面板 ===== */
+.admin-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.admin-section-head h2 { margin-bottom: 0; }
+.ai-usage-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 14px 0 10px;
+  border-block: 1px solid var(--rule);
+}
+.ai-usage-stat { min-width: 0; padding: 10px 8px; }
+.ai-usage-stat + .ai-usage-stat { border-left: 1px solid var(--rule); }
+.ai-usage-stat span,
+.ai-usage-stat strong { display: block; }
+.ai-usage-stat span { color: var(--sub); font-size: .7rem; font-weight: 600; }
+.ai-usage-stat strong {
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+  font-family: var(--mono);
+  font-size: .95rem;
+}
 .admin-actions {
   display: flex;
   gap: 8px;
@@ -1009,6 +1033,12 @@ select {
 .pill-btn:disabled:hover { background: none; }
 #admin-trash .expense-item { cursor: default; flex-wrap: wrap; }
 #btn-logout { margin-top: 4px; }
+
+@media (max-width: 420px) {
+  .ai-usage-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ai-usage-stat:nth-child(3) { border-left: none; border-top: 1px solid var(--rule); }
+  .ai-usage-stat:nth-child(4) { border-top: 1px solid var(--rule); }
+}
 
 /* ===== Toast ===== */
 .toast {

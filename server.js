@@ -371,6 +371,40 @@ function consumeAiQuota(ip) {
   return 0;
 }
 
+const insertAiUsage = db.prepare(`INSERT INTO ai_usage (
+  provider, model, has_receipt, success, latency_ms,
+  input_tokens, cached_input_tokens, output_tokens, error_code
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+
+function recordAiUsage({ provider, model, hasReceipt, success, startedAt, usage, errorCode }) {
+  try {
+    insertAiUsage.run(
+      provider,
+      model || null,
+      hasReceipt ? 1 : 0,
+      success ? 1 : 0,
+      Math.max(0, Date.now() - startedAt),
+      usage?.inputTokens || 0,
+      usage?.cachedInputTokens || 0,
+      usage?.outputTokens || 0,
+      errorCode || null
+    );
+    db.prepare("DELETE FROM ai_usage WHERE created_at < datetime('now', '-180 days')").run();
+  } catch (error) {
+    console.error('無法記錄 AI 使用統計:', error?.message || error);
+  }
+}
+
+function classifyAiError(error, aborted) {
+  if (aborted || error?.name === 'AbortError') return 'cancelled';
+  const status = Number(error?.status);
+  if (status === 429) return 'rate_limit';
+  if (status === 401 || status === 403) return 'authentication';
+  if (/^(AI 沒有|AI 回傳|無法分析)/.test(error?.message || '')) return 'invalid_output';
+  if (status >= 400 && status < 500) return 'request_error';
+  return 'upstream_error';
+}
+
 app.get('/api/ai/status', (req, res) => {
   res.json({
     mode: openai ? 'openai' : 'local',
@@ -396,10 +430,14 @@ app.post('/api/groups/:id/ai/parse', async (req, res) => {
   const context = getAiContext(req.params.id, body.defaultMemberId);
   if (!context) return res.status(404).json({ error: '找不到帳本' });
   const today = isValidDate(body.localDate) ? body.localDate : todayInTaipei();
+  const startedAt = Date.now();
 
   if (!openai) {
     const raw = localParse(text, { ...context, today, hasReceipt: !!receiptDataUrl });
     const draft = normalizeDraft(raw, { ...context, today, sourceText: text });
+    recordAiUsage({
+      provider: 'local', hasReceipt: !!receiptDataUrl, success: true, startedAt,
+    });
     return res.json({
       provider: 'local',
       model: null,
@@ -410,6 +448,10 @@ app.post('/api/groups/:id/ai/parse', async (req, res) => {
 
   const retryAfter = consumeAiQuota(req.ip);
   if (retryAfter) {
+    recordAiUsage({
+      provider: 'openai', model: OPENAI_MODEL, hasReceipt: !!receiptDataUrl,
+      success: false, startedAt, errorCode: 'rate_limit',
+    });
     res.setHeader('Retry-After', String(retryAfter));
     return res.status(429).json({ error: '智慧分析次數已達上限，請稍後再試' });
   }
@@ -417,7 +459,7 @@ app.post('/api/groups/:id/ai/parse', async (req, res) => {
   try {
     const abortController = new AbortController();
     req.once('aborted', () => abortController.abort());
-    const draft = await analyzeWithOpenAI({
+    const result = await analyzeWithOpenAI({
       client: openai,
       model: OPENAI_MODEL,
       text,
@@ -427,8 +469,19 @@ app.post('/api/groups/:id/ai/parse', async (req, res) => {
       safetyIdentifier: `ledger_${sha256(req.params.id).slice(0, 32)}`,
       signal: abortController.signal,
     });
-    return res.json({ provider: 'openai', model: OPENAI_MODEL, draft, notices: [] });
+    recordAiUsage({
+      provider: 'openai', model: OPENAI_MODEL, hasReceipt: !!receiptDataUrl,
+      success: true, startedAt, usage: result.usage,
+    });
+    return res.json({
+      provider: 'openai', model: OPENAI_MODEL, draft: result.draft, notices: [],
+    });
   } catch (error) {
+    recordAiUsage({
+      provider: 'openai', model: OPENAI_MODEL, hasReceipt: !!receiptDataUrl,
+      success: false, startedAt, usage: error.aiUsage,
+      errorCode: classifyAiError(error, req.aborted),
+    });
     if (req.aborted) return;
     const status = Number(error?.status);
     console.error('AI 帳目分析失敗:', status || '', error?.message || error);
@@ -883,7 +936,30 @@ app.get('/api/admin/overview', requireAdmin, (req, res) => {
         AS used_count
     FROM categories c WHERE c.group_id = ? ORDER BY c.sort, c.rowid`).all(group.id);
 
-  res.json({ group, members, deleted, categories });
+  const usageRow = db.prepare(`SELECT
+      COUNT(*) AS requests,
+      COALESCE(SUM(success), 0) AS successes,
+      COALESCE(SUM(has_receipt), 0) AS receipt_requests,
+      COALESCE(ROUND(AVG(latency_ms)), 0) AS average_latency_ms,
+      COALESCE(SUM(input_tokens), 0) AS input_tokens,
+      COALESCE(SUM(cached_input_tokens), 0) AS cached_input_tokens,
+      COALESCE(SUM(output_tokens), 0) AS output_tokens,
+      COALESCE(SUM(provider = 'openai'), 0) AS openai_requests,
+      COALESCE(SUM(provider = 'local'), 0) AS local_requests,
+      MAX(created_at) AS last_request_at
+    FROM ai_usage WHERE created_at >= datetime('now', '-30 days')`).get();
+  const usageErrors = db.prepare(`SELECT error_code, COUNT(*) AS count
+    FROM ai_usage
+    WHERE created_at >= datetime('now', '-30 days') AND error_code IS NOT NULL
+    GROUP BY error_code ORDER BY count DESC`).all();
+  const aiUsage = {
+    periodDays: 30,
+    ...usageRow,
+    failures: usageRow.requests - usageRow.successes,
+    errors: Object.fromEntries(usageErrors.map((row) => [row.error_code, row.count])),
+  };
+
+  res.json({ group, members, deleted, categories, aiUsage });
 });
 
 // 成員改名

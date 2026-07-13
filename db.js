@@ -72,6 +72,22 @@ CREATE TABLE IF NOT EXISTS admin_sessions (
   token_hash TEXT PRIMARY KEY,
   expires_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS ai_usage (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  provider TEXT NOT NULL,
+  model TEXT,
+  has_receipt INTEGER NOT NULL DEFAULT 0,
+  success INTEGER NOT NULL DEFAULT 0,
+  latency_ms INTEGER NOT NULL DEFAULT 0,
+  input_tokens INTEGER NOT NULL DEFAULT 0,
+  cached_input_tokens INTEGER NOT NULL DEFAULT 0,
+  output_tokens INTEGER NOT NULL DEFAULT 0,
+  error_code TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_usage_created ON ai_usage(created_at);
 `);
 
 // 既有資料庫補上軟刪除與單據欄位
