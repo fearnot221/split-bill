@@ -156,6 +156,28 @@ test('local parser keeps dates and times out of the amount', () => {
   }
 });
 
+test('local parser understands guarded Chinese money amounts', () => {
+  const cases = [
+    ['晚餐五百元我跟小明均分', 500, '晚餐'],
+    ['兩千四百塊旅館，我跟小明均分', 2400, '旅館'],
+    ['總共一萬零五十，住宿，我付不分攤', 10050, '住宿'],
+  ];
+  for (const [text, amount, description] of cases) {
+    const draft = normalizeDraft(
+      localParse(text, { ...context, today: '2026-07-14', hasReceipt: false }),
+      { ...context, today: '2026-07-14', sourceText: text }
+    );
+    assert.equal(draft.amount, amount, text);
+    assert.equal(draft.description, description, text);
+  }
+
+  const peopleOnly = normalizeDraft(
+    localParse('三人均分晚餐', { ...context, today: '2026-07-14', hasReceipt: false }),
+    { ...context, today: '2026-07-14', sourceText: '三人均分晚餐' }
+  );
+  assert.equal(peopleOnly.amount, null);
+});
+
 test('local parser handles everyone, income, and no-split phrases', () => {
   const everyoneText = '晚餐 1,500 大家均分我付';
   const everyone = normalizeDraft(
