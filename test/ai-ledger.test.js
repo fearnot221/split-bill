@@ -239,6 +239,22 @@ test('local parser validates thousands separators', () => {
   }
 });
 
+test('local parser consumes common Taiwan currency prefixes', () => {
+  for (const [text, amount, description] of [
+    ['NTD500晚餐我付', 500, '晚餐'],
+    ['台幣500車票我付', 500, '車票'],
+    ['新台幣1.2k旅館我付', 1200, '旅館'],
+    ['＄80早餐我付', 80, '早餐'],
+  ]) {
+    const draft = normalizeDraft(
+      localParse(text, { ...context, today: '2026-07-14', hasReceipt: false }),
+      { ...context, today: '2026-07-14', sourceText: text }
+    );
+    assert.equal(draft.amount, amount, text);
+    assert.equal(draft.description, description, text);
+  }
+});
+
 test('local parser ignores receipt and order identifiers', () => {
   for (const [text, amount, description] of [
     ['發票號碼 AB123456，晚餐500我付', 500, '晚餐'],
