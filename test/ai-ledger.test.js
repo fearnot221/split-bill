@@ -245,6 +245,8 @@ test('local parser consumes common Taiwan currency prefixes', () => {
     ['台幣500車票我付', 500, '車票'],
     ['新台幣1.2k旅館我付', 1200, '旅館'],
     ['＄80早餐我付', 80, '早餐'],
+    ['500圓晚餐我付', 500, '晚餐'],
+    ['五百圓車票我付', 500, '車票'],
   ]) {
     const draft = normalizeDraft(
       localParse(text, { ...context, today: '2026-07-14', hasReceipt: false }),
