@@ -1140,6 +1140,8 @@ let modalReturnFocus = null;
 let expenseSubmitLabel = '儲存';
 let modalFocusTimer = null;
 let expenseRequestId = null;
+let receiptTask = null;
+let receiptSequence = 0;
 
 function newRequestId() {
   if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
@@ -1181,6 +1183,7 @@ function setExpenseSubmitting(submitting, pendingLabel = '儲存中…') {
     .forEach((control) => { control.disabled = submitting; });
   const button = $('.modal-actions button[type="submit"]');
   button.textContent = submitting ? pendingLabel : expenseSubmitLabel;
+  button.disabled = submitting || !!receiptTask;
   $('.modal-card').setAttribute('aria-busy', String(submitting));
 }
 
@@ -1258,6 +1261,8 @@ function openExpenseModal(expense = null) {
   state.editingId = expense?.id || null;
   state.editingVersion = expense?.version || null;
   expenseRequestId = expense ? null : newRequestId();
+  receiptSequence += 1;
+  receiptTask = null;
 
   $('#form-expense').reset();
   $('#exp-desc').value = expense?.description || '';
@@ -1335,6 +1340,8 @@ function closeExpenseModal(force = false) {
   if (!force && hasUnsavedExpenseChanges()
     && !confirm('尚未儲存的變更會遺失，確定關閉？')) return false;
   const modal = $('#modal-expense');
+  receiptSequence += 1;
+  receiptTask = null;
   clearTimeout(modalFocusTimer);
   modal.classList.add('closing');
   modal._closeTimer = setTimeout(() => {
@@ -1359,10 +1366,13 @@ function renderReceiptUI() {
   if (receiptState.pending) thumb.src = receiptState.pending;
   else if (receiptState.existing && !receiptState.removed) thumb.src = `/uploads/${receiptState.existing}`;
   else thumb.removeAttribute('src');
-  $('#btn-receipt-pick').textContent = hasImage ? '更換單據' : '附上單據照片';
+  $('#btn-receipt-pick').textContent = receiptTask
+    ? '處理單據…'
+    : hasImage ? '更換單據' : '附上單據照片';
   $('#btn-receipt-view').classList.toggle('hidden',
     !(receiptState.existing && !receiptState.removed && !receiptState.pending));
   $('#btn-receipt-remove').classList.toggle('hidden', !hasImage);
+  $('.modal-actions button[type="submit"]').disabled = expenseSubmitting || !!receiptTask;
 }
 
 // 縮到最長邊 1600px 的 JPEG，避免上傳原始大圖
@@ -1402,16 +1412,35 @@ function compressImage(file) {
 
 $('#btn-receipt-pick').addEventListener('click', () => $('#exp-receipt-file').click());
 
-$('#exp-receipt-file').addEventListener('change', async (ev) => {
-  const file = ev.target.files[0];
+async function setExpenseReceiptFile(file) {
   if (!file) return;
+  const sequence = ++receiptSequence;
   try {
     if (!file.type.startsWith('image/')) throw new Error('請選擇圖片檔案');
     if (file.size > 25 * 1024 * 1024) throw new Error('圖片過大（原始檔上限 25MB）');
-    receiptState.pending = await compressImage(file);
-    receiptState.removed = false;
+    const task = compressImage(file);
+    receiptTask = task;
     renderReceiptUI();
-  } catch (e) { toast(e.message); }
+    const dataUrl = await task;
+    if (sequence !== receiptSequence) return;
+    receiptState.pending = dataUrl;
+    receiptState.removed = false;
+  } catch (error) {
+    if (sequence === receiptSequence) throw error;
+  } finally {
+    if (sequence === receiptSequence) {
+      receiptTask = null;
+      renderReceiptUI();
+    }
+  }
+}
+
+$('#exp-receipt-file').addEventListener('change', async (ev) => {
+  try {
+    await setExpenseReceiptFile(ev.target.files[0]);
+  } catch (error) {
+    toast(error.message);
+  }
   ev.target.value = '';
 });
 
@@ -1420,6 +1449,8 @@ $('#btn-receipt-view').addEventListener('click', () => {
 });
 
 $('#btn-receipt-remove').addEventListener('click', () => {
+  receiptSequence += 1;
+  receiptTask = null;
   receiptState.pending = null;
   receiptState.removed = !!receiptState.existing;
   renderReceiptUI();
@@ -1572,6 +1603,7 @@ window.addEventListener('beforeunload', (ev) => {
 $('#form-expense').addEventListener('submit', async (ev) => {
   ev.preventDefault();
   if (expenseSubmitting || expensePersisted) return;
+  if (receiptTask) return toast('單據仍在處理，完成後即可儲存');
   const amount = Number($('#exp-amount').value);
   let payload;
 
