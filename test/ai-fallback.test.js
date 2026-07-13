@@ -96,6 +96,7 @@ test('falls back to an editable local draft when OpenAI is unavailable', async (
   assert.equal(body.draft.amount, 500);
   assert.match(body.notices.join(' '), /已改用基本文字規則/);
   assert.match(body.notices.join(' '), /未辨識單據內容/);
+  assert.doesNotMatch(body.draft.warnings.join(' '), /尚未設定 AI/);
   assert.ok(upstreamRequests >= 1);
   assert.ok(upstreamBodies.every((requestBody) => requestBody.store === false));
   assert.ok(upstreamBodies.every((requestBody) => requestBody.max_output_tokens === 2000));
