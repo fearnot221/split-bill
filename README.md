@@ -84,7 +84,7 @@ OPENAI_MODEL='gpt-5.6' OPENAI_TIMEOUT_MS=30000 AI_REQUESTS_PER_HOUR=30 npm start
 - `OPENAI_TIMEOUT_MS`：單次 AI 請求逾時，預設 30 秒
 - `AI_REQUESTS_PER_HOUR`：每個來源 IP 每小時上限，預設 30 次
 
-沒有設定金鑰時，應用程式會用本地基本規則解析文字，單據仍可附加至帳目，但不會進行影像辨識。AI 模式下，當次文字與單據會傳送至 OpenAI，請求設定 `store: false`；API 金鑰只保留在伺服器端，不會傳到瀏覽器。管理統計只記錄模式、模型、是否含單據、成功狀態、延遲、token 數與粗分類錯誤，不保存文字、圖片、成員、來源 IP 或帳本識別，紀錄自動保留 180 天。實作依據 [Responses API](https://developers.openai.com/api/docs/guides/migrate-to-responses)、[Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs) 與 [Images and vision](https://developers.openai.com/api/docs/guides/images-vision) 官方文件。
+沒有設定金鑰時，應用程式會用本地基本規則解析文字，單據仍可附加至帳目，但不會進行影像辨識。AI 服務忙碌、逾時、設定失效或回傳格式異常時也會自動退回基本文字解析，保留可確認修改的草稿；若有單據，畫面會提示這次未辨識影像，圖片仍可隨帳目保存。AI 模式下，當次文字與單據會傳送至 OpenAI，請求設定 `store: false`；API 金鑰只保留在伺服器端，不會傳到瀏覽器。管理統計只記錄模式、模型、是否含單據、成功狀態、延遲、token 數與粗分類錯誤，不保存文字、圖片、成員、來源 IP 或帳本識別，紀錄自動保留 180 天。實作依據 [Responses API](https://developers.openai.com/api/docs/guides/migrate-to-responses)、[Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs) 與 [Images and vision](https://developers.openai.com/api/docs/guides/images-vision) 官方文件。
 
 ## 備份
 

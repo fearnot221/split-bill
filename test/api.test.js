@@ -147,6 +147,7 @@ test('API protects access, validates money, and rejects stale updates', async (t
     assert.equal(parsed.body.draft.category, '餐飲');
     assert.equal(parsed.body.draft.expenseDate, '2026-07-13');
     assert.deepEqual(new Set(parsed.body.draft.participantIds), new Set([payerId, memberId]));
+    assert.match(parsed.body.notices.join(' '), /基本文字規則/);
 
     const overview = await request('/api/admin/overview', { admin: true });
     assert.equal(overview.response.status, 200);

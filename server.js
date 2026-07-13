@@ -420,6 +420,14 @@ app.get('/api/ai/status', (req, res) => {
   });
 });
 
+function buildLocalAnalysis({ text, receiptDataUrl, context, today, notice }) {
+  const raw = localParse(text, { ...context, today, hasReceipt: !!receiptDataUrl });
+  const draft = normalizeDraft(raw, { ...context, today, sourceText: text });
+  const notices = [notice];
+  if (receiptDataUrl) notices.push('這次未辨識單據內容，圖片仍會隨帳目保存');
+  return { provider: 'local', model: null, draft, notices };
+}
+
 app.post('/api/groups/:id/ai/parse', async (req, res) => {
   const body = req.body;
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
@@ -440,17 +448,13 @@ app.post('/api/groups/:id/ai/parse', async (req, res) => {
   const startedAt = Date.now();
 
   if (!openai) {
-    const raw = localParse(text, { ...context, today, hasReceipt: !!receiptDataUrl });
-    const draft = normalizeDraft(raw, { ...context, today, sourceText: text });
     recordAiUsage({
       provider: 'local', hasReceipt: !!receiptDataUrl, success: true, startedAt,
     });
-    return res.json({
-      provider: 'local',
-      model: null,
-      draft,
-      notices: ['伺服器尚未設定 OPENAI_API_KEY，目前使用基本文字規則分析'],
-    });
+    return res.json(buildLocalAnalysis({
+      text, receiptDataUrl, context, today,
+      notice: '伺服器尚未設定 OPENAI_API_KEY，目前使用基本文字規則分析',
+    }));
   }
 
   const retryAfter = consumeAiQuota(req.ip);
@@ -459,8 +463,10 @@ app.post('/api/groups/:id/ai/parse', async (req, res) => {
       provider: 'openai', model: OPENAI_MODEL, hasReceipt: !!receiptDataUrl,
       success: false, startedAt, errorCode: 'rate_limit',
     });
-    res.setHeader('Retry-After', String(retryAfter));
-    return res.status(429).json({ error: '智慧分析次數已達上限，請稍後再試' });
+    return res.json(buildLocalAnalysis({
+      text, receiptDataUrl, context, today,
+      notice: '智慧分析次數已達上限，已改用基本文字規則分析',
+    }));
   }
 
   const clientAbort = bindClientAbort(req, res);
@@ -493,14 +499,15 @@ app.post('/api/groups/:id/ai/parse', async (req, res) => {
     if (cancelled) return;
     const status = Number(error?.status);
     console.error('AI 帳目分析失敗:', status || '', error?.message || error);
-    if (status === 429) return res.status(429).json({ error: 'AI 服務目前忙碌，請稍後再試' });
-    if (status === 401 || status === 403) {
-      return res.status(503).json({ error: 'AI 服務金鑰設定無效，請聯絡管理者' });
-    }
-    if (!status && /^(AI 沒有|AI 回傳|無法分析)/.test(error?.message || '')) {
-      return res.status(422).json({ error: error.message });
-    }
-    return res.status(502).json({ error: 'AI 帳目分析失敗，請稍後再試' });
+    const fallbackReason = status === 429
+      ? 'AI 服務目前忙碌'
+      : status === 401 || status === 403
+        ? 'AI 服務設定暫時無法使用'
+        : 'AI 分析暫時失敗';
+    return res.json(buildLocalAnalysis({
+      text, receiptDataUrl, context, today,
+      notice: `${fallbackReason}，已改用基本文字規則分析`,
+    }));
   } finally {
     clientAbort.cleanup();
   }
