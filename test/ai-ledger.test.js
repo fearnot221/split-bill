@@ -474,6 +474,30 @@ test('normalizer rejects unknown members and unsafe custom totals', () => {
     ...context, today: '2026-07-14', sourceText: '可能是車票',
   });
   assert.match(noConfidence.warnings.join(' '), /信心較低/);
+
+  const incomplete = normalizeDraft({
+    isLedgerEntry: true,
+    kind: 'expense',
+    description: '',
+    amount: 500,
+    category: null,
+    expenseDate: '2026-07-14',
+    payerName: null,
+    participantNames: [],
+    splitMode: 'none',
+    customSplits: [],
+    transferToName: null,
+    note: null,
+    confidence: 0.7,
+    warnings: [],
+  }, { ...context, today: '2026-07-14', sourceText: '幫我處理這筆 500' });
+  assert.equal(incomplete.ready, false);
+  assert.equal(incomplete.description, '');
+  assert.equal(incomplete.payerId, 'me');
+  assert.equal(incomplete.category, '其他');
+  assert.match(incomplete.warnings.join(' '), /項目說明/);
+  assert.match(incomplete.warnings.join(' '), /付款／收款人/);
+  assert.match(incomplete.warnings.join(' '), /分類/);
 });
 
 test('builds a private multimodal Responses API request', () => {
