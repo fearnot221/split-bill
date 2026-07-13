@@ -45,6 +45,14 @@ body {
 }
 
 .hidden { display: none !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-delay: 0s !important;
+    transition-duration: .01ms !important;
+  }
+}
 .visually-hidden {
   position: absolute;
   width: 1px; height: 1px;
@@ -209,6 +217,12 @@ select {
 .btn-ghost:hover { color: var(--ink); border-color: var(--rule-strong); }
 .btn-sm { width: auto; padding: 9px 18px; font-size: .88rem; }
 
+/* ===== 分頁切換過場 ===== */
+.tab-panel { animation: panel-in .28s cubic-bezier(.22, 1, .36, 1); }
+@keyframes panel-in {
+  from { opacity: 0; transform: translateY(8px); }
+}
+
 /* ===== 篩選列與分類 ===== */
 .filter-bar { margin-bottom: 4px; }
 .filter-bar input[type="search"] { margin-top: 0; }
@@ -259,7 +273,16 @@ select {
 
 /* ===== 支出列表（帳簿分欄線） ===== */
 .expense-list { list-style: none; }
-.expense-day { list-style: none; }
+.expense-day {
+  list-style: none;
+  animation: item-in .35s cubic-bezier(.22, 1, .36, 1) both;
+}
+/* 逐列進場：前幾組微幅延遲，之後一起出現 */
+.expense-day:nth-child(1) { animation-delay: 0s; }
+.expense-day:nth-child(2) { animation-delay: .04s; }
+.expense-day:nth-child(3) { animation-delay: .08s; }
+.expense-day:nth-child(4) { animation-delay: .12s; }
+.expense-day:nth-child(n+5) { animation-delay: .15s; }
 .expense-date-header {
   display: flex;
   justify-content: space-between;
@@ -282,8 +305,12 @@ select {
   padding: 12px 0;
   border-bottom: 1px solid var(--rule);
   cursor: pointer;
-  transition: background .12s;
+  transition: background .12s, transform .1s;
 }
+@keyframes item-in {
+  from { opacity: 0; transform: translateY(10px); }
+}
+.expense-item:active { transform: scale(.995); }
 .expense-item:hover { background: var(--fill); }
 .expense-item.transfer { cursor: default; }
 .expense-icon {
@@ -508,10 +535,8 @@ select {
 .bar-fill {
   height: 100%;
   background: var(--ink);
-  transition: width .3s ease;
+  transition: width .5s cubic-bezier(.22, 1, .36, 1);
 }
-
-#btn-export { margin-top: 18px; }
 
 /* ===== 新增按鈕與底部導覽 ===== */
 .fab {
@@ -624,6 +649,12 @@ select {
 
 @keyframes fade-in { from { opacity: 0; } }
 @keyframes slide-up { from { transform: translateY(48px); opacity: .3; } }
+
+/* Modal 關閉過場 */
+.modal.closing { animation: fade-out .18s ease forwards; }
+.modal.closing .modal-card { animation: slide-down .18s ease forwards; }
+@keyframes fade-out { to { opacity: 0; } }
+@keyframes slide-down { to { transform: translateY(32px); opacity: 0; } }
 
 .row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
@@ -770,6 +801,10 @@ select {
   animation: toast-in .2s cubic-bezier(.22, 1, .36, 1);
 }
 @keyframes toast-in { from { transform: translate(-50%, 12px); opacity: 0; } }
+.toast-out {
+  animation: toast-out .2s ease forwards;
+}
+@keyframes toast-out { to { transform: translate(-50%, 8px); opacity: 0; } }
 
 /* ===== 平板 / 桌面 ===== */
 @media (min-width: 768px) {

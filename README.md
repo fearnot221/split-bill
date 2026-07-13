@@ -16,7 +16,6 @@
 - **最少轉帳結算**：自動計算「誰付給誰多少錢」，按「已還款」一鍵記錄還款（還款不計入消費統計）
 - **統計圖表**：以天為單位的日期區間（含近 7 天／近 30 天／本月快選），顯示支出、收入、淨額與分類佔比
 - **搜尋與篩選**：關鍵字搜尋＋分類快篩
-- **CSV 匯出**：一鍵下載完整帳目（Excel 可直接開啟）
 - **單據照片**：記帳時可附上單據，前端自動壓縮後上傳（存於 `uploads/`），列表以迴紋針標示
 - **金額顏色**：支出紅、還款綠，一眼分辨
 - **回收桶**：刪除的支出可從管理面板復原（清空回收桶會連單據檔案一併刪除）
@@ -48,7 +47,7 @@ npm start
 
 打開 http://localhost:3000 即可使用。開發模式（改檔自動重啟）：`npm run dev`，換埠號：`PORT=8080 npm start`。
 
-資料存在伺服器的 `data.db`（SQLite，已列入 `.gitignore`），所有裝置連同一台伺服器即共用同一份帳本；備份直接複製 `data.db` 或用網頁裡的「匯出 CSV」。
+資料存在伺服器的 `data.db`（SQLite，已列入 `.gitignore`），所有裝置連同一台伺服器即共用同一份帳本；備份直接複製 `data.db` 即可。
 
 ## 部署到自己的伺服器
 
@@ -92,7 +91,6 @@ WantedBy=multi-user.target
 - `GET /api/me` — 取得（或自動建立）預設帳本
 - `GET /api/groups/:id` — 取得帳本資料（成員、支出、結餘、結算方案）
 - `PATCH /api/groups/:id` — 修改帳本名稱
-- `GET /api/groups/:id/export` — 匯出 CSV
 - `POST /api/groups/:id/members` — 新增成員
 - `DELETE /api/groups/:id/members/:memberId` — 刪除成員（無帳務紀錄者）
 - `POST /api/groups/:id/expenses` — 新增支出

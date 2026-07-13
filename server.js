@@ -141,29 +141,6 @@ app.patch('/api/groups/:id', (req, res) => {
   res.json({ ok: true });
 });
 
-// 匯出 CSV（含 BOM，Excel 可直接開啟中文）
-app.get('/api/groups/:id/export', (req, res) => {
-  const data = getGroupData(req.params.id);
-  if (!data) return res.status(404).json({ error: '找不到帳本' });
-  const nameOf = (id) => data.members.find((m) => m.id === id)?.name || '?';
-  const esc = (v) => `"${String(v).replace(/"/g, '""')}"`;
-  const rows = [['日期', '類型', '說明', '分類', '付款人', '金額', '分攤明細', '備註']];
-  for (const e of data.expenses) {
-    const type = e.kind === 'income'
-      ? '收入'
-      : TRANSFER_CATEGORIES.includes(e.category) ? e.category : '支出';
-    rows.push([
-      e.expense_date, type, e.description, e.category, nameOf(e.payer_id), e.amount,
-      e.splits.map((s) => `${nameOf(s.member_id)}:${s.amount}`).join('; '),
-      e.note || '',
-    ]);
-  }
-  const csv = '\uFEFF' + rows.map((r) => r.map(esc).join(',')).join('\r\n');
-  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-  res.setHeader('Content-Disposition', `attachment; filename="expenses-${new Date().toISOString().slice(0, 10)}.csv"`);
-  res.send(csv);
-});
-
 // 取得群組完整資料
 app.get('/api/groups/:id', (req, res) => {
   const data = getGroupData(req.params.id);

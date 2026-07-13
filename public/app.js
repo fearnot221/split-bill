@@ -75,9 +75,43 @@ function fmtDate(iso) {
 function toast(msg) {
   const el = $('#toast');
   el.textContent = msg;
-  el.classList.remove('hidden');
+  el.classList.remove('hidden', 'toast-out');
   clearTimeout(el._t);
-  el._t = setTimeout(() => el.classList.add('hidden'), 2200);
+  clearTimeout(el._t2);
+  el._t = setTimeout(() => {
+    el.classList.add('toast-out');
+    el._t2 = setTimeout(() => el.classList.add('hidden'), 220);
+  }, 2200);
+}
+
+// 數字滾動：從目前值補間到新值（約 0.4 秒）
+const REDUCED_MOTION = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+function animateNumber(el, target, prefix = '') {
+  const from = el._num ?? 0;
+  el._num = target;
+  if (from === target || REDUCED_MOTION) { el.textContent = prefix + fmt(target); return; }
+  cancelAnimationFrame(el._raf);
+  const start = performance.now();
+  const dur = 400;
+  const step = (now) => {
+    const t = Math.min(1, (now - start) / dur);
+    const eased = 1 - Math.pow(1 - t, 3); // ease-out cubic
+    const v = Math.round((from + (target - from) * eased) * 100) / 100;
+    el.textContent = prefix + fmt(v);
+    if (t < 1) el._raf = requestAnimationFrame(step);
+  };
+  el._raf = requestAnimationFrame(step);
+}
+
+// 長條圖從 0 長到目標寬度（重繪後下一影格再套用寬度）
+function animateBars(container) {
+  const fills = container.querySelectorAll('.bar-fill');
+  fills.forEach((f) => {
+    const w = f.style.width;
+    f.style.width = '0%';
+    requestAnimationFrame(() => requestAnimationFrame(() => { f.style.width = w; }));
+  });
 }
 
 async function api(url, options = {}) {
@@ -126,10 +160,10 @@ function renderAll() {
   // 摘要列：整本帳的總支出／總收入／淨額（一趟旅行一本帳，不以月份切分）
   const { totalIncome } = state.data;
   const net = Math.round((totalIncome - total) * 100) / 100;
-  $('#total-amount').textContent = fmt(total);
-  $('#total-income').textContent = fmt(totalIncome);
+  animateNumber($('#total-amount'), total);
+  animateNumber($('#total-income'), totalIncome);
   const netEl = $('#net-amount');
-  netEl.textContent = (net > 0 ? '+' : '') + fmt(net);
+  animateNumber(netEl, net, net > 0 ? '+' : '');
   netEl.className = 'stat-value ' + (net > 0.005 ? 'positive' : net < -0.005 ? 'negative' : '');
 
   renderFilterChips();
@@ -189,7 +223,7 @@ function renderExpenses() {
     else last.items.push(e);
   }
 
-  list.innerHTML = days.map((day) => {
+  const html = days.map((day) => {
     const dayTotal = day.items.reduce((s, e) => (isSpend(e) ? s + e.amount : s), 0);
     return `
     <li class="expense-day">
@@ -200,6 +234,10 @@ function renderExpenses() {
       <ul class="day-group">${day.items.map(expenseItemHtml).join('')}</ul>
     </li>`;
   }).join('');
+
+  if (list.dataset.sig === html) return; // 內容沒變就不重建（避免輪詢時動畫重播）
+  list.dataset.sig = html;
+  list.innerHTML = html;
 
   list.querySelectorAll('.expense-item').forEach((item) => {
     const expense = state.data.expenses.find((e) => e.id === item.dataset.id);
@@ -268,10 +306,10 @@ function renderStats() {
   const total = filtered.reduce((s, e) => s + e.amount, 0);
   const totalIncome = incomes.reduce((s, e) => s + e.amount, 0);
   const net = Math.round((totalIncome - total) * 100) / 100;
-  $('#stat-total').textContent = fmt(total);
-  $('#stat-income').textContent = fmt(totalIncome);
+  animateNumber($('#stat-total'), total);
+  animateNumber($('#stat-income'), totalIncome);
   const netEl = $('#stat-net');
-  netEl.textContent = (net > 0 ? '+' : '') + fmt(net);
+  animateNumber(netEl, net, net > 0 ? '+' : '');
   netEl.className = 'stat-value ' + (net > 0.005 ? 'positive' : net < -0.005 ? 'negative' : '');
 
   $('#stats-empty').classList.toggle('hidden', filtered.length > 0);
@@ -316,6 +354,13 @@ function renderStats() {
         <div class="bar-sub">付款 ${fmt(p)}｜應分攤 ${fmt(sh)}</div>
       </li>`;
   }).join('');
+}
+
+// 統計頁可見時讓長條從 0 長出（切分頁或改區間時呼叫，輪詢更新不重播）
+function replayStatsBars() {
+  if ($('#tab-stats').classList.contains('hidden') || REDUCED_MOTION) return;
+  animateBars($('#cat-stats'));
+  animateBars($('#member-stats'));
 }
 
 /* ===== 分類 chips（清單來自帳本資料，可自訂新增） ===== */
@@ -369,8 +414,17 @@ $$('.tab-btn').forEach((btn) => {
   btn.addEventListener('click', () => {
     $$('.tab-btn').forEach((b) => b.classList.toggle('active', b === btn));
     const tab = btn.dataset.tab;
-    $$('.tab-panel').forEach((p) => p.classList.toggle('hidden', p.id !== `tab-${tab}`));
+    $$('.tab-panel').forEach((p) => {
+      const show = p.id === `tab-${tab}`;
+      p.classList.toggle('hidden', !show);
+      if (show) { // 重新觸發過場動畫
+        p.style.animation = 'none';
+        void p.offsetHeight;
+        p.style.animation = '';
+      }
+    });
     $('#btn-add-expense').classList.toggle('hidden', tab !== 'expenses');
+    if (tab === 'stats') replayStatsBars();
   });
 });
 
@@ -387,6 +441,7 @@ function setStatsRange(from, to) {
   $('#stats-from').value = from;
   $('#stats-to').value = to;
   renderStats();
+  replayStatsBars();
 }
 
 $$('#stats-presets .chip').forEach((chip) => {
@@ -405,12 +460,9 @@ for (const id of ['stats-from', 'stats-to']) {
     state[id === 'stats-from' ? 'statsFrom' : 'statsTo'] = ev.target.value;
     $$('#stats-presets .chip').forEach((c) => c.classList.remove('active'));
     renderStats();
+    replayStatsBars();
   });
 }
-
-$('#btn-export').addEventListener('click', () => {
-  location.href = `/api/groups/${state.groupId}/export`;
-});
 
 /* ===== 新增 / 編輯支出 Modal ===== */
 let splitMode = 'equal';
@@ -543,12 +595,19 @@ function openExpenseModal(expense = null) {
   renderReceiptUI();
   $('#btn-delete-expense').classList.toggle('hidden', !expense);
 
-  $('#modal-expense').classList.remove('hidden');
+  const modal = $('#modal-expense');
+  clearTimeout(modal._closeTimer);
+  modal.classList.remove('hidden', 'closing');
   setTimeout(() => $('#exp-desc').focus(), 50);
 }
 
 function closeExpenseModal() {
-  $('#modal-expense').classList.add('hidden');
+  const modal = $('#modal-expense');
+  modal.classList.add('closing');
+  modal._closeTimer = setTimeout(() => {
+    modal.classList.add('hidden');
+    modal.classList.remove('closing');
+  }, 180);
   state.editingId = null;
 }
 
@@ -702,6 +761,9 @@ $('#btn-add-expense').addEventListener('click', () => openExpenseModal());
 $('#btn-close-modal').addEventListener('click', closeExpenseModal);
 $('#modal-expense').addEventListener('click', (ev) => {
   if (ev.target === ev.currentTarget) closeExpenseModal();
+});
+document.addEventListener('keydown', (ev) => {
+  if (ev.key === 'Escape' && !$('#modal-expense').classList.contains('hidden')) closeExpenseModal();
 });
 
 $('#form-expense').addEventListener('submit', async (ev) => {
