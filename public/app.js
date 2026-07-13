@@ -122,10 +122,21 @@ function animateBars(container) {
 }
 
 async function api(url, options = {}) {
-  const res = await fetch(url, {
-    headers: { 'Content-Type': 'application/json' },
-    ...options,
-  });
+  let res;
+  try {
+    res = await fetch(url, {
+      headers: { 'Content-Type': 'application/json' },
+      ...options,
+    });
+  } catch (cause) {
+    const message = navigator.onLine === false
+      ? '目前處於離線狀態，請確認網路後重試'
+      : '無法連線到帳本，請稍後重試';
+    const error = new Error(message);
+    error.cause = cause;
+    error.status = 0;
+    throw error;
+  }
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
     const error = new Error(body.error || '發生錯誤，請稍後再試');
@@ -133,6 +144,15 @@ async function api(url, options = {}) {
     throw error;
   }
   return body;
+}
+
+function showConnectionStatus(message) {
+  $('#connection-message').textContent = message;
+  $('#connection-status').classList.remove('hidden');
+}
+
+function clearConnectionStatus() {
+  $('#connection-status').classList.add('hidden');
 }
 
 function memberName(id) {
@@ -164,11 +184,17 @@ async function refresh({ poll = false } = {}) {
   if (poll && !canPoll()) return;
 
   const seq = ++state.refreshSeq;
-  const data = await api(`/api/groups/${state.groupId}`);
-  if (seq !== state.refreshSeq || (poll && !canPoll())) return;
+  try {
+    const data = await api(`/api/groups/${state.groupId}`);
+    if (seq !== state.refreshSeq || (poll && !canPoll())) return;
 
-  state.data = data;
-  renderAll();
+    state.data = data;
+    clearConnectionStatus();
+    renderAll();
+  } catch (error) {
+    if (seq === state.refreshSeq) showConnectionStatus(error.message);
+    throw error;
+  }
 }
 
 /* ===== 渲染 ===== */
@@ -269,16 +295,24 @@ $('#expense-list').addEventListener('click', async (ev) => {
   if (!expense) return;
 
   if (ev.target.closest('.expense-del')) {
+    const deleteButton = ev.target.closest('.expense-del');
     if (!confirm(`確定刪除「${expense.description}」？`)) return;
+    deleteButton.disabled = true;
     try {
       await api(`/api/groups/${state.groupId}/expenses/${expense.id}?version=${expense.version}`, {
         method: 'DELETE',
       });
-      toast('已刪除');
-      refresh();
+      try {
+        await refresh();
+        toast('已刪除');
+      } catch {
+        toast('已刪除，重新連線後會更新畫面');
+      }
     } catch (e) {
       if (e.status === 409) refresh().catch(() => {});
       toast(e.message);
+    } finally {
+      if (deleteButton.isConnected) deleteButton.disabled = false;
     }
     return;
   }
@@ -432,9 +466,13 @@ function renderModalCats(selected) {
         method: 'POST',
         body: JSON.stringify({ name }),
       });
-      await refresh();
-      renderModalCats(name); // 重建並選中新類別
-      toast('類別已新增');
+      try {
+        await refresh();
+        renderModalCats(name); // 重建並選中新類別
+        toast('類別已新增');
+      } catch {
+        toast('類別已新增，重新連線後會更新畫面');
+      }
     } catch (e) { toast(e.message); }
   });
 }
@@ -442,7 +480,12 @@ function renderModalCats(selected) {
 /* ===== 分頁切換 ===== */
 $$('.tab-btn').forEach((btn) => {
   btn.addEventListener('click', () => {
-    $$('.tab-btn').forEach((b) => b.classList.toggle('active', b === btn));
+    $$('.tab-btn').forEach((b) => {
+      const active = b === btn;
+      b.classList.toggle('active', active);
+      if (active) b.setAttribute('aria-current', 'page');
+      else b.removeAttribute('aria-current');
+    });
     const tab = btn.dataset.tab;
     $$('.tab-panel').forEach((p) => {
       const show = p.id === `tab-${tab}`;
@@ -470,6 +513,8 @@ function setStatsRange(from, to) {
   state.statsTo = to;
   $('#stats-from').value = from;
   $('#stats-to').value = to;
+  $('#stats-from').max = to;
+  $('#stats-to').min = from;
   renderStats();
   replayStatsBars();
 }
@@ -487,10 +532,14 @@ $$('#stats-presets .chip').forEach((chip) => {
 
 for (const id of ['stats-from', 'stats-to']) {
   $(`#${id}`).addEventListener('change', (ev) => {
-    state[id === 'stats-from' ? 'statsFrom' : 'statsTo'] = ev.target.value;
+    let from = id === 'stats-from' ? ev.target.value : state.statsFrom;
+    let to = id === 'stats-to' ? ev.target.value : state.statsTo;
+    if (from && to && from > to) {
+      if (id === 'stats-from') to = from;
+      else from = to;
+    }
     $$('#stats-presets .chip').forEach((c) => c.classList.remove('active'));
-    renderStats();
-    replayStatsBars();
+    setStatsRange(from, to);
   });
 }
 
@@ -500,13 +549,41 @@ let expenseKind = 'expense';
 let transferCat = '轉帳'; // 編輯舊「還款」紀錄時保留原類別
 let expenseSubmitting = false;
 let expensePersisted = false;
+let expenseFormBaseline = '';
+let modalReturnFocus = null;
 
-function setExpenseSubmitting(submitting) {
+function expenseDraftSignature() {
+  return JSON.stringify({
+    kind: expenseKind,
+    splitMode,
+    description: $('#exp-desc').value,
+    amount: $('#exp-amount').value,
+    date: $('#exp-date').value,
+    note: $('#exp-note').value,
+    payer: $('#exp-payer').value,
+    transferTo: $('#exp-transfer-to').value,
+    category: $('#exp-categories .chip.active')?.dataset.cat || '',
+    splits: [...$('#split-members').children].map((row) => ({
+      id: row.dataset.id,
+      checked: row.querySelector('input[type=checkbox]').checked,
+      amount: row.querySelector('.split-amount-input').value,
+    })),
+    receiptPending: !!receiptState.pending,
+    receiptRemoved: receiptState.removed,
+  });
+}
+
+function hasUnsavedExpenseChanges() {
+  return !expensePersisted && expenseFormBaseline && expenseDraftSignature() !== expenseFormBaseline;
+}
+
+function setExpenseSubmitting(submitting, pendingLabel = '儲存中…') {
   expenseSubmitting = submitting;
+  $$('#modal-expense button, #modal-expense input, #modal-expense select, #modal-expense textarea')
+    .forEach((control) => { control.disabled = submitting; });
   const button = $('#form-expense button[type="submit"]');
-  button.disabled = submitting;
-  button.textContent = submitting ? '儲存中…' : '儲存';
-  $('#modal-expense').setAttribute('aria-busy', String(submitting));
+  button.textContent = submitting ? pendingLabel : '儲存';
+  $('.modal-card').setAttribute('aria-busy', String(submitting));
 }
 
 function setKind(kind) {
@@ -572,6 +649,7 @@ function setSplitMode(mode) {
 
 function openExpenseModal(expense = null) {
   if (expenseSubmitting) return;
+  modalReturnFocus = document.activeElement;
   const { members } = state.data;
   expensePersisted = false;
   state.editingId = expense?.id || null;
@@ -637,23 +715,32 @@ function openExpenseModal(expense = null) {
   $('#exp-receipt-file').value = '';
   renderReceiptUI();
   $('#btn-delete-expense').classList.toggle('hidden', !expense);
+  expenseFormBaseline = expenseDraftSignature();
 
   const modal = $('#modal-expense');
   clearTimeout(modal._closeTimer);
   modal.classList.remove('hidden', 'closing');
+  $('#view-group').inert = true;
+  document.body.classList.add('modal-open');
   setTimeout(() => $('#exp-desc').focus(), 50);
 }
 
 function closeExpenseModal(force = false) {
-  if (expenseSubmitting && !force) return;
+  if (expenseSubmitting && !force) return false;
+  if (!force && hasUnsavedExpenseChanges()
+    && !confirm('尚未儲存的變更會遺失，確定關閉？')) return false;
   const modal = $('#modal-expense');
   modal.classList.add('closing');
   modal._closeTimer = setTimeout(() => {
     modal.classList.add('hidden');
     modal.classList.remove('closing');
+    $('#view-group').inert = false;
+    document.body.classList.remove('modal-open');
+    if (modalReturnFocus?.isConnected) modalReturnFocus.focus();
   }, 180);
   state.editingId = null;
   state.editingVersion = null;
+  return true;
 }
 
 /* ===== 單據照片 ===== */
@@ -679,12 +766,25 @@ function compressImage(file) {
     const img = new Image();
     img.onload = () => {
       URL.revokeObjectURL(url);
-      const scale = Math.min(1, 1600 / Math.max(img.width, img.height));
-      const canvas = document.createElement('canvas');
-      canvas.width = Math.round(img.width * scale);
-      canvas.height = Math.round(img.height * scale);
-      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-      resolve(canvas.toDataURL('image/jpeg', 0.82));
+      try {
+        if (!img.width || !img.height || img.width * img.height > 100_000_000) {
+          throw new Error('圖片尺寸過大，請改用較小的圖片');
+        }
+        const scale = Math.min(1, 1600 / Math.max(img.width, img.height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        const context = canvas.getContext('2d');
+        if (!context) throw new Error('這個瀏覽器無法處理圖片');
+        context.drawImage(img, 0, 0, canvas.width, canvas.height);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
+        if (!dataUrl.startsWith('data:image/jpeg;base64,')) {
+          throw new Error('圖片轉換失敗，請改用其他圖片');
+        }
+        resolve(dataUrl);
+      } catch (error) {
+        reject(error);
+      }
     };
     img.onerror = () => {
       URL.revokeObjectURL(url);
@@ -700,6 +800,8 @@ $('#exp-receipt-file').addEventListener('change', async (ev) => {
   const file = ev.target.files[0];
   if (!file) return;
   try {
+    if (!file.type.startsWith('image/')) throw new Error('請選擇圖片檔案');
+    if (file.size > 25 * 1024 * 1024) throw new Error('圖片過大（原始檔上限 25MB）');
     receiptState.pending = await compressImage(file);
     receiptState.removed = false;
     renderReceiptUI();
@@ -721,20 +823,30 @@ $('#btn-delete-expense').addEventListener('click', async () => {
   if (!state.editingId || expenseSubmitting) return;
   const exp = state.data.expenses.find((e) => e.id === state.editingId);
   if (!confirm(`確定刪除「${exp?.description ?? '這筆支出'}」？`)) return;
+  setExpenseSubmitting(true, '處理中…');
   try {
     await api(
       `/api/groups/${state.groupId}/expenses/${state.editingId}?version=${exp.version}`,
       { method: 'DELETE' }
     );
-    closeExpenseModal();
-    toast('已刪除');
-    refresh();
+    expensePersisted = true;
+    setExpenseSubmitting(false);
+    closeExpenseModal(true);
+    try {
+      await refresh();
+      toast('已刪除');
+    } catch {
+      toast('已刪除，重新連線後會更新畫面');
+    }
   } catch (e) {
     if (e.status === 409) {
-      closeExpenseModal();
+      setExpenseSubmitting(false);
+      closeExpenseModal(true);
       refresh().catch(() => {});
     }
     toast(e.message);
+  } finally {
+    setExpenseSubmitting(false);
   }
 });
 
@@ -817,7 +929,33 @@ $('#modal-expense').addEventListener('click', (ev) => {
   if (ev.target === ev.currentTarget) closeExpenseModal();
 });
 document.addEventListener('keydown', (ev) => {
-  if (ev.key === 'Escape' && !$('#modal-expense').classList.contains('hidden')) closeExpenseModal();
+  const modal = $('#modal-expense');
+  if (modal.classList.contains('hidden') || modal.classList.contains('closing')) return;
+  if (ev.key === 'Escape') {
+    ev.preventDefault();
+    closeExpenseModal();
+    return;
+  }
+  if (ev.key !== 'Tab') return;
+  const focusable = [...modal.querySelectorAll(
+    'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled])'
+  )].filter((el) => !el.closest('.hidden'));
+  if (focusable.length === 0) return;
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (ev.shiftKey && document.activeElement === first) {
+    ev.preventDefault();
+    last.focus();
+  } else if (!ev.shiftKey && document.activeElement === last) {
+    ev.preventDefault();
+    first.focus();
+  }
+});
+
+window.addEventListener('beforeunload', (ev) => {
+  if ($('#modal-expense').classList.contains('hidden') || !hasUnsavedExpenseChanges()) return;
+  ev.preventDefault();
+  ev.returnValue = '';
 });
 
 $('#form-expense').addEventListener('submit', async (ev) => {
@@ -946,17 +1084,40 @@ $('#form-expense').addEventListener('submit', async (ev) => {
 });
 
 /* ===== 初始化 ===== */
-(async function init() {
+let initializing = false;
+
+async function initialize() {
+  if (initializing) return;
+  initializing = true;
   try {
-    const me = await api('/api/me');
-    state.groupId = me.groupId;
-    state.memberId = me.memberId;
+    if (!state.groupId) {
+      const me = await api('/api/me');
+      state.groupId = me.groupId;
+      state.memberId = me.memberId;
+    }
     await refresh();
-    state.pollTimer = setInterval(() => refresh({ poll: true }).catch(() => {}), 15000);
+    if (!state.pollTimer) {
+      state.pollTimer = setInterval(() => refresh({ poll: true }).catch(() => {}), 15000);
+    }
   } catch (e) {
-    toast(e.message);
+    showConnectionStatus(e.message);
+  } finally {
+    initializing = false;
   }
-})();
+}
+
+$('#btn-retry').addEventListener('click', async (ev) => {
+  ev.currentTarget.disabled = true;
+  await initialize();
+  ev.currentTarget.disabled = false;
+});
+
+window.addEventListener('offline', () => {
+  showConnectionStatus('目前處於離線狀態，帳本將在網路恢復後更新');
+});
+window.addEventListener('online', () => initialize());
+
+initialize();
 
 document.addEventListener('visibilitychange', () => {
   if (canPoll()) refresh({ poll: true }).catch(() => {});

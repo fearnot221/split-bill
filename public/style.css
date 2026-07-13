@@ -43,6 +43,7 @@ body {
   line-height: 1.6;
   min-height: 100dvh;
 }
+body.modal-open { overflow: hidden; }
 
 .hidden { display: none !important; }
 
@@ -60,6 +61,11 @@ body {
   clip: rect(0 0 0 0);
 }
 button { font-family: inherit; color: var(--ink); }
+button:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+button:disabled { cursor: wait; opacity: .5; }
 svg { display: block; }
 
 .container {
@@ -99,6 +105,22 @@ svg { display: block; }
   max-width: 620px;
   margin: 0 auto;
   padding: 0 20px;
+}
+.connection-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--red);
+  color: var(--red);
+  font-size: .84rem;
+  font-weight: 600;
+}
+.connection-status .pill-btn {
+  flex-shrink: 0;
+  color: var(--red);
+  border-color: var(--red);
 }
 .stat-strip {
   display: flex;
@@ -621,6 +643,7 @@ select {
   padding: 22px 22px calc(22px + env(safe-area-inset-bottom));
   animation: slide-up .24s cubic-bezier(.22, 1, .36, 1);
 }
+.modal-card[aria-busy="true"] { cursor: wait; }
 .modal-card::-webkit-scrollbar { display: none; }
 .modal-header {
   display: flex;

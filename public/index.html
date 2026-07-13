@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="theme-color" content="#f5f3ee">
   <title>分帳小工具 — 記帳分帳</title>
-  <link rel="stylesheet" href="style.css?v=13">
+  <link rel="stylesheet" href="style.css?v=14">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%2344705a'/><text x='50' y='72' font-size='60' text-anchor='middle' fill='white' font-family='Helvetica,Arial,sans-serif' font-weight='bold'>$</text></svg>">
 </head>
 <body>
@@ -17,6 +17,10 @@
     </header>
 
     <div class="summary-wrap">
+      <div id="connection-status" class="connection-status hidden" role="status">
+        <span id="connection-message">無法連線到帳本</span>
+        <button type="button" id="btn-retry" class="pill-btn">重試</button>
+      </div>
       <div class="stat-strip">
         <div class="stat">
           <span class="stat-label">總支出</span>
@@ -37,6 +41,7 @@
       <!-- 支出列表 -->
       <section id="tab-expenses" class="tab-panel">
         <div class="filter-bar">
+          <label class="visually-hidden" for="filter-text">搜尋紀錄</label>
           <input type="search" id="filter-text" placeholder="搜尋說明、付款人…" autocomplete="off">
           <div class="chip-row" id="filter-cats"></div>
         </div>
@@ -105,8 +110,8 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
     </button>
 
-    <nav class="tab-bar">
-      <button class="tab-btn active" data-tab="expenses">
+    <nav class="tab-bar" aria-label="主要分頁">
+      <button class="tab-btn active" data-tab="expenses" aria-current="page">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z"/><path d="M16 8h-6"/><path d="M16 12H8"/></svg>
         <span>明細</span>
       </button>
@@ -123,7 +128,7 @@
 
   <!-- ===== 新增 / 編輯支出 Modal ===== -->
   <div id="modal-expense" class="modal hidden">
-    <div class="modal-card">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modal-title">
       <div class="modal-header">
         <h2 id="modal-title">新增支出</h2>
         <button id="btn-close-modal" class="icon-btn" aria-label="關閉">
@@ -187,8 +192,8 @@
     </div>
   </div>
 
-  <div id="toast" class="toast hidden"></div>
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
-  <script src="app.js?v=16"></script>
+  <script src="app.js?v=17"></script>
 </body>
 </html>

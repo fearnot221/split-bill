@@ -57,6 +57,9 @@ function showAuth(mode) {
   $('#auth-title').textContent = mode === 'setup' ? '首次使用：設定管理密碼' : '管理員登入';
   $('#auth-confirm-wrap').classList.toggle('hidden', mode !== 'setup');
   $('#auth-confirm').required = mode === 'setup';
+  const password = $('#auth-password');
+  password.minLength = mode === 'setup' ? 8 : 1;
+  password.autocomplete = mode === 'setup' ? 'new-password' : 'current-password';
   $('#auth-submit').textContent = mode === 'setup' ? '設定並登入' : '登入';
   $('#form-auth').dataset.mode = mode;
 }
@@ -74,7 +77,7 @@ $('#form-auth').addEventListener('submit', async (ev) => {
       body: JSON.stringify({ password }),
     });
     ev.target.reset();
-    loadPanel();
+    await loadPanel();
   } catch (e) { toast(e.message); }
 });
 
@@ -90,6 +93,15 @@ async function loadPanel() {
   renderMembers();
   renderCats();
   renderTrash();
+}
+
+async function reloadPanel(successMessage) {
+  try {
+    await loadPanel();
+    toast(successMessage);
+  } catch (error) {
+    toast(`${successMessage}，但畫面重新載入失敗：${error.message}`);
+  }
 }
 
 function renderMembers() {
@@ -123,8 +135,7 @@ function renderMembers() {
           method: 'POST',
           body: JSON.stringify({ name }),
         });
-        toast('已改名');
-        loadPanel();
+        await reloadPanel('已改名');
       } catch (e) { toast(e.message); }
     });
   });
@@ -136,8 +147,7 @@ function renderMembers() {
       if (!confirm(`確定刪除成員「${member.name}」？`)) return;
       try {
         await api(`/api/groups/${overview.group.id}/members/${member.id}`, { method: 'DELETE' });
-        toast('成員已刪除');
-        loadPanel();
+        await reloadPanel('成員已刪除');
       } catch (e) { toast(e.message); }
     });
   });
@@ -163,8 +173,7 @@ function renderCats() {
       if (!confirm(`確定刪除類別「${cat.name}」？`)) return;
       try {
         await api(`/api/groups/${overview.group.id}/categories/${cat.id}`, { method: 'DELETE' });
-        toast('類別已刪除');
-        loadPanel();
+        await reloadPanel('類別已刪除');
       } catch (e) { toast(e.message); }
     });
   });
@@ -194,8 +203,7 @@ function renderTrash() {
       const id = btn.closest('li').dataset.id;
       try {
         await api(`/api/admin/expenses/${id}/restore`, { method: 'POST' });
-        toast('已復原');
-        loadPanel();
+        await reloadPanel('已復原');
       } catch (e) { toast(e.message); }
     });
   });
@@ -207,8 +215,7 @@ function renderTrash() {
       if (!confirm(`永久刪除「${exp.description}」？此動作無法復原。`)) return;
       try {
         await api(`/api/admin/expenses/${exp.id}`, { method: 'DELETE' });
-        toast('已永久刪除');
-        loadPanel();
+        await reloadPanel('已永久刪除');
       } catch (e) { toast(e.message); }
     });
   });
@@ -223,8 +230,7 @@ $('#form-admin-add').addEventListener('submit', async (ev) => {
       body: JSON.stringify({ name: $('#admin-new-name').value }),
     });
     ev.target.reset();
-    toast('成員已新增');
-    loadPanel();
+    await reloadPanel('成員已新增');
   } catch (e) { toast(e.message); }
 });
 
@@ -236,8 +242,7 @@ $('#form-admin-add-cat').addEventListener('submit', async (ev) => {
       body: JSON.stringify({ name: $('#admin-new-cat').value }),
     });
     ev.target.reset();
-    toast('類別已新增');
-    loadPanel();
+    await reloadPanel('類別已新增');
   } catch (e) { toast(e.message); }
 });
 
@@ -245,8 +250,7 @@ $('#btn-clear-trash').addEventListener('click', async () => {
   if (!confirm(`清空回收桶？${overview.deleted.length} 筆紀錄將永久刪除，無法復原。`)) return;
   try {
     const r = await api('/api/admin/trash', { method: 'DELETE' });
-    toast(`已永久刪除 ${r.deleted} 筆`);
-    loadPanel();
+    await reloadPanel(`已永久刪除 ${r.deleted} 筆`);
   } catch (e) { toast(e.message); }
 });
 
@@ -260,13 +264,15 @@ $('#form-rename').addEventListener('submit', async (ev) => {
         currency: $('#ledger-currency').value,
       }),
     });
-    toast('帳本設定已更新');
-    loadPanel();
+    await reloadPanel('帳本設定已更新');
   } catch (e) { toast(e.message); }
 });
 
 $('#form-password').addEventListener('submit', async (ev) => {
   ev.preventDefault();
+  if ($('#pw-next').value !== $('#pw-confirm').value) {
+    return toast('兩次輸入的新密碼不一致');
+  }
   try {
     await api('/api/admin/password', {
       method: 'POST',

@@ -60,6 +60,9 @@ app.use((req, res, next) => {
     "frame-ancestors 'none'",
     "form-action 'self'",
   ].join('; '));
+  if (req.path === '/api' || req.path.startsWith('/api/')) {
+    res.setHeader('Cache-Control', 'no-store');
+  }
   if (req.secure) {
     res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   }
@@ -672,7 +675,7 @@ app.get('/api/admin/status', (req, res) => {
 app.post('/api/admin/setup', (req, res) => {
   if (getConf('password')) return res.status(409).json({ error: '已設定過密碼' });
   const password = typeof req.body?.password === 'string' ? req.body.password : '';
-  if (!password || password.length < 6) return res.status(400).json({ error: '密碼至少 6 碼' });
+  if (!password || password.length < 8) return res.status(400).json({ error: '密碼至少 8 碼' });
   if (password.length > 128) return res.status(400).json({ error: '密碼最多 128 碼' });
   db.transaction(() => {
     setConf('password', hashPassword(password));
@@ -710,7 +713,7 @@ app.post('/api/admin/password', requireAdmin, (req, res) => {
   if (!current || !verifyPassword(current, stored)) {
     return res.status(401).json({ error: '目前密碼錯誤' });
   }
-  if (!next || next.length < 6) return res.status(400).json({ error: '新密碼至少 6 碼' });
+  if (!next || next.length < 8) return res.status(400).json({ error: '新密碼至少 8 碼' });
   if (next.length > 128) return res.status(400).json({ error: '新密碼最多 128 碼' });
   db.transaction(() => {
     setConf('password', hashPassword(next));

@@ -59,12 +59,14 @@ test('API protects access, validates money, and rejects stale updates', async (t
     assert.equal(response.status, 401);
     assert.match(response.headers.get('www-authenticate'), /^Basic /);
     assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
+    assert.equal(response.headers.get('cache-control'), 'no-store');
     assert.equal(response.headers.get('x-powered-by'), null);
   });
 
   await t.test('creates the ledger but protects management routes', async () => {
     const me = await request('/api/me');
     assert.equal(me.response.status, 200);
+    assert.equal(me.response.headers.get('cache-control'), 'no-store');
     groupId = me.body.groupId;
     payerId = me.body.memberId;
 
@@ -76,6 +78,13 @@ test('API protects access, validates money, and rejects stale updates', async (t
   });
 
   await t.test('establishes an admin session and updates ledger settings', async () => {
+    const weakSetup = await request('/api/admin/setup', {
+      method: 'POST',
+      body: { password: '1234567' },
+    });
+    assert.equal(weakSetup.response.status, 400);
+    assert.match(weakSetup.body.error, /8/);
+
     const setup = await request('/api/admin/setup', {
       method: 'POST',
       body: { password: 'admin-secret' },
@@ -100,6 +109,14 @@ test('API protects access, validates money, and rejects stale updates', async (t
     });
     assert.equal(member.response.status, 200);
     memberId = member.body.memberId;
+
+    const weakPasswordChange = await request('/api/admin/password', {
+      method: 'POST',
+      admin: true,
+      body: { current: 'admin-secret', next: '1234567' },
+    });
+    assert.equal(weakPasswordChange.response.status, 400);
+    assert.match(weakPasswordChange.body.error, /8/);
   });
 
   await t.test('rejects fractional cents, duplicate members, and invalid dates', async () => {
