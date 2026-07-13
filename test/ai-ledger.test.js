@@ -297,6 +297,13 @@ test('local parser preserves description words and extracts a trailing note', ()
   assert.equal(draft.description, '連續記帳測試');
   assert.equal(draft.note, '每月核對');
 
+  const compactNoteText = '晚餐500我付不分攤備註聚餐';
+  const compactNote = normalizeDraft(
+    localParse(compactNoteText, { ...context, today: '2026-07-14', hasReceipt: false }),
+    { ...context, today: '2026-07-14', sourceText: compactNoteText }
+  );
+  assert.equal(compactNote.note, '聚餐');
+
   const commandText = '請幫我記帳：昨天晚餐 500，我付不分攤';
   const command = normalizeDraft(
     localParse(commandText, { ...context, today: '2026-07-14', hasReceipt: false }),
