@@ -128,6 +128,20 @@ test('local parser identifies a transfer target', () => {
     assert.equal(shorthandDraft.description, '轉帳', shorthand);
   }
 
+  for (const [bareTransfer, payerId, transferToId] of [
+    ['我給小明500', 'me', 'ming'],
+    ['小明付給我500', 'ming', 'me'],
+  ]) {
+    const bareDraft = normalizeDraft(
+      localParse(bareTransfer, { ...context, today: '2026-07-14', hasReceipt: false }),
+      { ...context, today: '2026-07-14', sourceText: bareTransfer }
+    );
+    assert.equal(bareDraft.kind, 'transfer', bareTransfer);
+    assert.equal(bareDraft.payerId, payerId, bareTransfer);
+    assert.equal(bareDraft.transferToId, transferToId, bareTransfer);
+    assert.equal(bareDraft.amount, 500, bareTransfer);
+  }
+
   const contextualText = '訂房代墊，我轉小明500';
   const contextual = normalizeDraft(
     localParse(contextualText, { ...context, today: '2026-07-14', hasReceipt: false }),
@@ -203,6 +217,14 @@ test('local parser understands guarded Chinese money amounts', () => {
     { ...context, today: '2026-07-14', sourceText: '三人均分晚餐' }
   );
   assert.equal(peopleOnly.amount, null);
+
+  const salary = normalizeDraft(
+    localParse('薪水五萬今天收到', { ...context, today: '2026-07-14', hasReceipt: false }),
+    { ...context, today: '2026-07-14', sourceText: '薪水五萬今天收到' }
+  );
+  assert.equal(salary.kind, 'income');
+  assert.equal(salary.description, '薪水');
+  assert.equal(salary.amount, 50000);
 });
 
 test('local parser handles k shorthand without truncating units', () => {
