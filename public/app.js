@@ -890,11 +890,13 @@ function setupSmartSpeechInput() {
       const input = $('#smart-input');
       input.value = `${input.value}${input.value.trim() ? '。' : ''}${finalText}`;
       resizeSmartInput();
+      syncSmartAnalyzeButton();
       scheduleSmartDraftPersist();
     }
     if (interimText) setSmartFeedback(`聽到：${interimText}`);
   };
   recognition.onerror = (event) => {
+    if (event.error === 'aborted') return;
     const message = event.error === 'not-allowed'
       ? '麥克風權限未開啟'
       : event.error === 'no-speech' ? '沒有聽到語音，請再試一次' : '語音辨識失敗';
