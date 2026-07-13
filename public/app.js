@@ -934,7 +934,22 @@ function showAiReview(result) {
     return item;
   }));
   list.classList.toggle('hidden', warnings.length === 0);
-  $('#ai-review').classList.remove('hidden');
+  const review = $('#ai-review');
+  review.classList.toggle('notice', (result.notices || []).length > 0);
+  review.classList.toggle('needs-attention', (draft.warnings || []).length > 0 || !draft.ready);
+  review.classList.remove('hidden');
+}
+
+function aiDraftFocusTarget(draft) {
+  if (!draft.description) return $('#exp-desc');
+  if (!draft.amount) return $('#exp-amount');
+  if (draft.kind === 'transfer' && !draft.transferToId) return $('#exp-transfer-to');
+  const warnings = (draft.warnings || []).join(' ');
+  if (/日期/.test(warnings)) return $('#exp-date');
+  if (/(分攤|成員)/.test(warnings) && draft.kind !== 'transfer') return $('#split-equal');
+  if (/(付款|收款)人/.test(warnings)) return $('#exp-payer');
+  if (/分類/.test(warnings)) return $('#exp-categories .chip') || $('#exp-desc');
+  return $('.modal-actions button[type="submit"]');
 }
 
 function applyAiDraft(result) {
@@ -978,13 +993,7 @@ function applyAiDraft(result) {
   showAiReview(result);
   setSmartFeedback('草稿已建立，請確認後儲存');
   clearTimeout(modalFocusTimer);
-  const focusTarget = !draft.description
-    ? $('#exp-desc')
-    : !draft.amount
-      ? $('#exp-amount')
-      : draft.kind === 'transfer' && !draft.transferToId
-        ? $('#exp-transfer-to')
-        : $('.modal-actions button[type="submit"]');
+  const focusTarget = aiDraftFocusTarget(draft);
   modalFocusTimer = setTimeout(() => focusTarget.focus(), 50);
 }
 
@@ -1254,6 +1263,7 @@ function openExpenseModal(expense = null) {
   expenseSubmitLabel = '儲存';
   $('.modal-actions button[type="submit"]').textContent = expenseSubmitLabel;
   $('#ai-review').classList.add('hidden');
+  $('#ai-review').classList.remove('notice', 'needs-attention');
   $('#ai-review-warnings').replaceChildren();
   modalReturnFocus = document.activeElement;
   const { members } = state.data;

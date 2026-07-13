@@ -15,6 +15,7 @@
   --fill: rgba(38, 35, 29, .05);
   --green: #3d7a55;
   --red: #b3564d;
+  --warn: #9a712d;
   --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
 }
 
@@ -29,6 +30,7 @@
     --fill: rgba(232, 228, 218, .06);
     --green: #8fbf9f;
     --red: #cf8e85;
+    --warn: #d0a75f;
   }
 }
 
@@ -878,6 +880,8 @@ select {
 }
 .ai-review-title { font-weight: 700; }
 .ai-review ul { margin: 3px 0 0 17px; color: var(--sub); }
+.ai-review.notice { border-left-color: var(--warn); }
+.ai-review.needs-attention { border-left-color: var(--red); }
 
 .split-header {
   display: flex;
