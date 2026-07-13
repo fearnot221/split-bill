@@ -648,6 +648,14 @@ function setSmartFeedback(message, error = false) {
   feedback.classList.toggle('error', error);
 }
 
+function resizeSmartInput() {
+  const input = $('#smart-input');
+  input.style.height = 'auto';
+  const height = Math.min(input.scrollHeight, 220);
+  input.style.height = `${Math.max(92, height)}px`;
+  input.style.overflowY = input.scrollHeight > 220 ? 'auto' : 'hidden';
+}
+
 function setSmartAnalyzing(analyzing) {
   smartAnalyzing = analyzing;
   if (analyzing && smartSpeechRecognition
@@ -742,6 +750,7 @@ async function loadAiStatus() {
 
 function clearSmartEntry() {
   $('#smart-input').value = '';
+  resizeSmartInput();
   $('#smart-receipt-file').value = '';
   smartReceiptDataUrl = null;
   smartReceiptName = '';
@@ -823,6 +832,7 @@ async function restoreSmartDraft() {
     const draft = await readSmartDraft();
     if (!draft || $('#smart-input').value || smartReceiptDataUrl) return;
     $('#smart-input').value = typeof draft.text === 'string' ? draft.text : '';
+    resizeSmartInput();
     smartReceiptDataUrl = typeof draft.receiptDataUrl === 'string' ? draft.receiptDataUrl : null;
     smartReceiptName = typeof draft.receiptName === 'string' ? draft.receiptName : '';
     renderSmartReceipt();
@@ -855,6 +865,7 @@ function setupSmartSpeechInput() {
     if (finalText) {
       const input = $('#smart-input');
       input.value = `${input.value}${input.value.trim() ? '。' : ''}${finalText}`;
+      resizeSmartInput();
       scheduleSmartDraftPersist();
     }
     if (interimText) setSmartFeedback(`聽到：${interimText}`);
@@ -1096,7 +1107,10 @@ $('#smart-input').addEventListener('keydown', (ev) => {
     analyzeSmartEntry();
   }
 });
-$('#smart-input').addEventListener('input', scheduleSmartDraftPersist);
+$('#smart-input').addEventListener('input', () => {
+  resizeSmartInput();
+  scheduleSmartDraftPersist();
+});
 $('#smart-input').addEventListener('paste', (ev) => {
   const image = [...(ev.clipboardData?.files || [])].find((file) => file.type.startsWith('image/'));
   if (image) setSmartReceiptFile(image).catch((error) => setSmartFeedback(error.message, true));
