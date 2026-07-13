@@ -58,6 +58,7 @@ let smartReceiptDataUrl = null;
 let smartReceiptName = '';
 let smartAnalyzing = false;
 let aiDraftActive = false;
+let aiDraftConsumesSmartEntry = false;
 let smartPersistTimer = null;
 let smartDraftRestored = false;
 let smartDbPromise = null;
@@ -727,6 +728,7 @@ function clearSmartEntry() {
   smartReceiptSequence += 1;
   smartReceiptTask = null;
   aiDraftActive = false;
+  aiDraftConsumesSmartEntry = false;
   renderSmartReceipt();
   clearTimeout(smartPersistTimer);
   deleteSmartDraft().catch(() => {});
@@ -956,6 +958,7 @@ function applyAiDraft(result) {
   const { draft } = result;
   openExpenseModal();
   aiDraftActive = true;
+  aiDraftConsumesSmartEntry = result.provider !== 'recent';
   modalReturnFocus = $('#smart-input');
   expenseSubmitLabel = '確認並儲存';
   $('.modal-actions button[type="submit"]').textContent = expenseSubmitLabel;
@@ -1260,6 +1263,7 @@ function setSplitMode(mode) {
 function openExpenseModal(expense = null) {
   if (expenseSubmitting) return;
   aiDraftActive = false;
+  aiDraftConsumesSmartEntry = false;
   expenseSubmitLabel = '儲存';
   $('.modal-actions button[type="submit"]').textContent = expenseSubmitLabel;
   $('#ai-review').classList.add('hidden');
@@ -1698,7 +1702,7 @@ $('#form-expense').addEventListener('submit', async (ev) => {
       persistedVersion = saved.version;
     }
     expensePersisted = true;
-    const completedAiDraft = aiDraftActive;
+    const completedSmartDraft = aiDraftActive && aiDraftConsumesSmartEntry;
 
     // 單據：有新照片就上傳（會自動替換舊的），被移除就刪掉
     let receiptError = null;
@@ -1723,7 +1727,7 @@ $('#form-expense').addEventListener('submit', async (ev) => {
 
     setExpenseSubmitting(false);
     closeExpenseModal(true);
-    if (completedAiDraft) clearSmartEntry();
+    if (completedSmartDraft) clearSmartEntry();
     refresh().catch(() => {});
     if (receiptError) {
       const action = receiptUpdate.pending ? '上傳' : '移除';
