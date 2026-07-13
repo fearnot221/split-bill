@@ -107,6 +107,61 @@ test('local parser handles everyone, income, and no-split phrases', () => {
   assert.deepEqual(income.participantIds, ['me']);
 });
 
+test('local parser handles common payer, transfer, date, category, and total phrasing', () => {
+  const richContext = {
+    ...context,
+    members: [
+      ...context.members,
+      { id: 'mei', name: '小美', is_fund: 0 },
+    ],
+    categories: [...context.categories, { name: '醫療' }],
+  };
+  const cases = [
+    {
+      text: '小明出的晚餐 900，我、小明、小美均分',
+      expected: { description: '晚餐', amount: 900, payerId: 'ming', splitMode: 'equal' },
+    },
+    {
+      text: '晚餐 900，由小明支付，三人均分',
+      expected: { payerId: 'ming', participantIds: ['me', 'ming', 'mei'] },
+    },
+    {
+      text: '小明匯給我 500',
+      expected: { kind: 'transfer', payerId: 'ming', transferToId: 'me', amount: 500 },
+    },
+    {
+      text: '我轉800到公帳',
+      expected: { kind: 'transfer', payerId: 'me', transferToId: 'fund', amount: 800 },
+    },
+    {
+      text: '退款 300 小美收，我跟小美均分',
+      expected: { kind: 'income', payerId: 'mei', participantIds: ['me', 'mei'] },
+    },
+    {
+      text: '看診 450，分類醫療，我付不分攤',
+      expected: { category: '醫療', splitMode: 'none', description: '看診' },
+    },
+    {
+      text: '前天停車費 120，我付',
+      expected: { expenseDate: '2026-07-12', category: '交通', description: '停車費' },
+    },
+    {
+      text: '晚餐 小明100 小美200 我200，總共500，我付',
+      expected: { amount: 500, splitMode: 'custom' },
+    },
+  ];
+
+  for (const { text, expected } of cases) {
+    const draft = normalizeDraft(
+      localParse(text, { ...richContext, today: '2026-07-14', hasReceipt: false }),
+      { ...richContext, today: '2026-07-14', sourceText: text }
+    );
+    for (const [key, value] of Object.entries(expected)) {
+      assert.deepEqual(draft[key], value, `${text}: ${key}`);
+    }
+  }
+});
+
 test('normalizer rejects unknown members and unsafe custom totals', () => {
   const draft = normalizeDraft({
     isLedgerEntry: true,
