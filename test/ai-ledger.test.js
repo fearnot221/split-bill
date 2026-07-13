@@ -154,6 +154,15 @@ test('local parser keeps dates and times out of the amount', () => {
     assert.equal(draft.amount, null, invalidPrecision);
     assert.match(draft.warnings.join(' '), /尚未辨識金額/, invalidPrecision);
   }
+
+  for (const invalidDate of ['2026-02-30晚餐500我付', '2/30晚餐500我付']) {
+    const draft = normalizeDraft(
+      localParse(invalidDate, { ...context, today: '2026-07-14', hasReceipt: false }),
+      { ...context, today: '2026-07-14', sourceText: invalidDate }
+    );
+    assert.equal(draft.expenseDate, '2026-07-14', invalidDate);
+    assert.match(draft.warnings.join(' '), /日期無效/, invalidDate);
+  }
 });
 
 test('local parser understands guarded Chinese money amounts', () => {
