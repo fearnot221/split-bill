@@ -195,6 +195,31 @@ test('local parser handles everyone, income, and no-split phrases', () => {
   assert.equal(income.kind, 'income');
   assert.equal(income.splitMode, 'none');
   assert.deepEqual(income.participantIds, ['me']);
+
+  const personalMealText = '個人鍋晚餐500，大家均分，我付';
+  const personalMeal = normalizeDraft(
+    localParse(personalMealText, { ...context, today: '2026-07-14', hasReceipt: false }),
+    { ...context, today: '2026-07-14', sourceText: personalMealText }
+  );
+  assert.equal(personalMeal.splitMode, 'equal');
+  assert.deepEqual(personalMeal.participantIds, ['me', 'ming']);
+
+  for (const text of ['晚餐500不用分', '晚餐500不需分', '晚餐500算個人']) {
+    const personal = normalizeDraft(
+      localParse(text, { ...context, today: '2026-07-14', hasReceipt: false }),
+      { ...context, today: '2026-07-14', sourceText: text }
+    );
+    assert.equal(personal.splitMode, 'none', text);
+    assert.deepEqual(personal.participantIds, ['me'], text);
+  }
+
+  const singleParticipantText = '晚餐500，分帳：小明，我付';
+  const singleParticipant = normalizeDraft(
+    localParse(singleParticipantText, { ...context, today: '2026-07-14', hasReceipt: false }),
+    { ...context, today: '2026-07-14', sourceText: singleParticipantText }
+  );
+  assert.equal(singleParticipant.splitMode, 'equal');
+  assert.deepEqual(singleParticipant.participantIds, ['ming']);
 });
 
 test('local parser preserves description words and extracts a trailing note', () => {
