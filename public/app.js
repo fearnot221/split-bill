@@ -851,25 +851,41 @@ function setupSmartSpeechInput() {
   });
 }
 
-function buildRepeatText(expense) {
-  const income = isIncome(expense);
-  const payer = memberName(expense.payer_id);
-  let text = `${income ? '收入 ' : ''}${expense.description} ${expense.amount}`;
-  if (expense.category && expense.category !== '其他') text += `，分類${expense.category}`;
-  text += `，${payer}${income ? '收款' : '付'}`;
+function buildRepeatDraft(expense) {
   const splits = expense.splits || [];
   const selfOnly = splits.length === 1
     && splits[0].member_id === expense.payer_id
     && Math.abs(splits[0].amount - expense.amount) < 0.011;
-  if (selfOnly) return `${text}，不分攤`;
   const shares = equalSplit(expense.amount, splits.length);
   const equal = splits.length > 0
     && splits.every((split, index) => Math.abs(split.amount - shares[index]) < 0.011);
-  if (equal) return `${text}，${splits.map((split) => memberName(split.member_id)).join('、')}均分`;
-  if (splits.length) {
-    return `${text}，${splits.map((split) => `${memberName(split.member_id)}${split.amount}`).join('、')}`;
-  }
-  return text;
+  const splitMode = selfOnly ? 'none' : equal ? 'equal' : splits.length ? 'custom' : 'none';
+  return {
+    isLedgerEntry: true,
+    ready: true,
+    kind: isIncome(expense) ? 'income' : 'expense',
+    description: expense.description,
+    amount: expense.amount,
+    category: expense.category,
+    expenseDate: todayLocal(),
+    payerId: expense.payer_id,
+    payerName: memberName(expense.payer_id),
+    participantIds: splits.map((split) => split.member_id),
+    participantNames: splits.map((split) => memberName(split.member_id)),
+    splitMode,
+    customSplits: splitMode === 'custom'
+      ? splits.map((split) => ({
+        memberId: split.member_id,
+        memberName: memberName(split.member_id),
+        amount: split.amount,
+      }))
+      : [],
+    transferToId: null,
+    transferToName: null,
+    note: null,
+    confidence: 1,
+    warnings: [],
+  };
 }
 
 function renderSmartRecents(expenses) {
@@ -899,17 +915,15 @@ $('#smart-recent-list').addEventListener('click', (ev) => {
   if (!button) return;
   const expense = state.data?.expenses.find((item) => item.id === button.dataset.id);
   if (!expense) return;
-  $('#smart-input').value = buildRepeatText(expense);
-  scheduleSmartDraftPersist();
-  setSmartFeedback('已帶入最近紀錄，可直接分析或修改');
-  $('#smart-input').focus();
+  applyAiDraft({ provider: 'recent', model: null, draft: buildRepeatDraft(expense), notices: [] });
+  setSmartFeedback('已帶入最近紀錄，請確認後儲存');
 });
 
 function showAiReview(result) {
   const { draft } = result;
   const title = result.provider === 'openai'
     ? `AI 草稿 · 信心 ${Math.round(draft.confidence * 100)}%`
-    : '基本文字草稿';
+    : result.provider === 'recent' ? '最近紀錄' : '基本文字草稿';
   $('#ai-review-title').textContent = `${title}，儲存前請確認`;
   const warnings = [...(result.notices || []), ...(draft.warnings || [])];
   const list = $('#ai-review-warnings');
