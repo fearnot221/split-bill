@@ -101,6 +101,33 @@ test('local parser identifies a transfer target', () => {
   assert.equal(draft.payerId, 'me');
   assert.equal(draft.transferToId, 'ming');
   assert.deepEqual(draft.participantIds, []);
+  assert.equal(draft.description, '轉帳');
+
+  for (const shorthand of ['我還小明500', '我匯小明500', '我轉小明500']) {
+    const shorthandDraft = normalizeDraft(
+      localParse(shorthand, { ...context, today: '2026-07-14', hasReceipt: false }),
+      { ...context, today: '2026-07-14', sourceText: shorthand }
+    );
+    assert.equal(shorthandDraft.kind, 'transfer', shorthand);
+    assert.equal(shorthandDraft.payerId, 'me', shorthand);
+    assert.equal(shorthandDraft.transferToId, 'ming', shorthand);
+    assert.equal(shorthandDraft.amount, 500, shorthand);
+    assert.equal(shorthandDraft.description, '轉帳', shorthand);
+  }
+
+  const contextualText = '訂房代墊，我轉小明500';
+  const contextual = normalizeDraft(
+    localParse(contextualText, { ...context, today: '2026-07-14', hasReceipt: false }),
+    { ...context, today: '2026-07-14', sourceText: contextualText }
+  );
+  assert.equal(contextual.description, '訂房代墊');
+
+  for (const ordinaryText of ['轉角咖啡500我付', '還有小明，晚餐500我付', '匯率差額500我付']) {
+    const ordinary = localParse(ordinaryText, {
+      ...context, today: '2026-07-14', hasReceipt: false,
+    });
+    assert.equal(ordinary.kind, 'expense', ordinaryText);
+  }
 });
 
 test('local parser keeps dates and times out of the amount', () => {
