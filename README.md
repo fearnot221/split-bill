@@ -165,7 +165,7 @@ npm run verify
 - `POST /api/groups/:id/expenses-with-receipt` — 原子新增支出與單據
 - `GET /api/ai/status` — 取得 AI／本地解析模式
 - `POST /api/groups/:id/ai/parse` — 將文字與可選單據轉為待確認帳目草稿
-- `PUT /api/groups/:id/expenses/:expenseId` — 依版本編輯支出
+- `PUT /api/groups/:id/expenses/:expenseId` — 依版本編輯支出，可原子替換或移除單據
 - `DELETE /api/groups/:id/expenses/:expenseId?version=:version` — 依版本軟刪除支出
 - `POST /api/groups/:id/expenses/:expenseId/receipt` — 依 body `version` 上傳或替換單據
 - `DELETE /api/groups/:id/expenses/:expenseId/receipt?version=:version` — 依版本移除單據

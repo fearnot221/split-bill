@@ -1713,8 +1713,7 @@ $('#form-expense').addEventListener('submit', async (ev) => {
 
   const isEdit = !!state.editingId;
   if (isEdit) payload.version = state.editingVersion;
-  let expenseId = state.editingId;
-  let persistedVersion = state.editingVersion;
+  const expenseId = state.editingId;
   const receiptUpdate = {
     pending: receiptState.pending,
     remove: receiptState.removed && !!receiptState.existing,
@@ -1723,58 +1722,31 @@ $('#form-expense').addEventListener('submit', async (ev) => {
 
   try {
     if (isEdit) {
-      const saved = await api(`/api/groups/${state.groupId}/expenses/${expenseId}`, {
+      if (receiptUpdate.pending) payload.receiptDataUrl = receiptUpdate.pending;
+      else if (receiptUpdate.remove) payload.removeReceipt = true;
+      await api(`/api/groups/${state.groupId}/expenses/${expenseId}`, {
         method: 'PUT',
         body: JSON.stringify(payload),
       });
-      persistedVersion = saved.version;
     } else {
       payload.clientRequestId = expenseRequestId;
       if (receiptUpdate.pending) payload.receiptDataUrl = receiptUpdate.pending;
       const endpoint = receiptUpdate.pending
         ? `/api/groups/${state.groupId}/expenses-with-receipt`
         : `/api/groups/${state.groupId}/expenses`;
-      const saved = await api(endpoint, {
+      await api(endpoint, {
         method: 'POST',
         body: JSON.stringify(payload),
       });
-      expenseId = saved.expenseId;
-      persistedVersion = saved.version;
     }
     expensePersisted = true;
     const completedSmartDraft = aiDraftActive && aiDraftConsumesSmartEntry;
-
-    // 單據：有新照片就上傳（會自動替換舊的），被移除就刪掉
-    let receiptError = null;
-    try {
-      if (receiptUpdate.pending && isEdit) {
-        await api(`/api/groups/${state.groupId}/expenses/${expenseId}/receipt`, {
-          method: 'POST',
-          body: JSON.stringify({
-            dataUrl: receiptUpdate.pending,
-            version: persistedVersion,
-          }),
-        });
-      } else if (receiptUpdate.remove) {
-        await api(
-          `/api/groups/${state.groupId}/expenses/${expenseId}/receipt?version=${persistedVersion}`,
-          { method: 'DELETE' }
-        );
-      }
-    } catch (e) {
-      receiptError = e;
-    }
 
     setExpenseSubmitting(false);
     closeExpenseModal(true);
     if (completedSmartDraft) clearSmartEntry();
     refresh().catch(() => {});
-    if (receiptError) {
-      const action = receiptUpdate.pending ? '上傳' : '移除';
-      toast(`帳目已${isEdit ? '更新' : '新增'}，但單據${action}失敗：${receiptError.message}`);
-    } else {
-      toast(isEdit ? '已更新' : '已新增');
-    }
+    toast(isEdit ? '已更新' : '已新增');
   } catch (e) {
     if (e.status === 409) {
       setExpenseSubmitting(false);

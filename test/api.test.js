@@ -399,6 +399,76 @@ test('API protects access, validates money, and rejects stale updates', async (t
     assert.equal(removed.response.status, 200);
     assert.equal(removed.body.version, 4);
     await assert.rejects(fs.stat(uploadedPath), { code: 'ENOENT' });
+
+    const atomicBase = {
+      payerId,
+      description: '原子編輯單據',
+      amount: 0.01,
+      category: '其他',
+      expenseDate: '2026-07-13',
+      kind: 'expense',
+      splits: [{ memberId, amount: 0.01 }],
+    };
+    const invalidAtomic = await request(`/api/groups/${groupId}/expenses/${expenseId}`, {
+      method: 'PUT',
+      body: {
+        ...atomicBase,
+        description: '不應套用的編輯',
+        version: 4,
+        receiptDataUrl: `data:image/jpeg;base64,${Buffer.from('not an image').toString('base64')}`,
+      },
+    });
+    assert.equal(invalidAtomic.response.status, 400);
+    const afterInvalid = await request(`/api/groups/${groupId}`);
+    assert.equal(
+      afterInvalid.body.expenses.find((expense) => expense.id === expenseId).description,
+      '更新後'
+    );
+
+    const replacement = Buffer.from([0xff, 0xd8, 0xff, 0x01, 0xd9]);
+    const atomic = await request(`/api/groups/${groupId}/expenses/${expenseId}`, {
+      method: 'PUT',
+      body: {
+        ...atomicBase,
+        version: 4,
+        receiptDataUrl: `data:image/jpeg;base64,${replacement.toString('base64')}`,
+      },
+    });
+    assert.equal(atomic.response.status, 200);
+    assert.equal(atomic.body.version, 5);
+    assert.match(atomic.body.receipt, /\.jpg$/);
+    const atomicPath = path.join(tempDir, 'uploads', atomic.body.receipt);
+    assert.equal((await fs.stat(atomicPath)).size, replacement.length);
+
+    const filesBeforeStale = await fs.readdir(path.join(tempDir, 'uploads'));
+    const staleAtomic = await request(`/api/groups/${groupId}/expenses/${expenseId}`, {
+      method: 'PUT',
+      body: {
+        ...atomicBase,
+        version: 4,
+        receiptDataUrl: `data:image/jpeg;base64,${replacement.toString('base64')}`,
+      },
+    });
+    assert.equal(staleAtomic.response.status, 409);
+    assert.deepEqual(await fs.readdir(path.join(tempDir, 'uploads')), filesBeforeStale);
+
+    const atomicRemoval = await request(`/api/groups/${groupId}/expenses/${expenseId}`, {
+      method: 'PUT',
+      body: {
+        ...atomicBase,
+        description: '原子移除單據',
+        version: 5,
+        removeReceipt: true,
+      },
+    });
+    assert.equal(atomicRemoval.response.status, 200);
+    assert.equal(atomicRemoval.body.version, 6);
+    assert.equal(atomicRemoval.body.receipt, null);
+    await assert.rejects(fs.stat(atomicPath), { code: 'ENOENT' });
+    const afterAtomicRemoval = await request(`/api/groups/${groupId}`);
+    const atomicallyEdited = afterAtomicRemoval.body.expenses.find((expense) => expense.id === expenseId);
+    assert.equal(atomicallyEdited.description, '原子移除單據');
+    assert.equal(atomicallyEdited.receipt, null);
   });
 
   await t.test('invalidates sessions when the admin password is reset out of band', async () => {

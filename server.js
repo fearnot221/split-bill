@@ -110,6 +110,9 @@ const aiJson = express.json({ limit: '15mb' });
 app.use('/api/groups/:id/expenses/:expenseId/receipt', (req, res, next) => {
   return req.method === 'POST' ? receiptJson(req, res, next) : next();
 });
+app.use('/api/groups/:id/expenses/:expenseId', (req, res, next) => {
+  return req.method === 'PUT' ? receiptJson(req, res, next) : next();
+});
 app.use('/api/groups/:id/ai/parse', (req, res, next) => {
   return req.method === 'POST' ? aiJson(req, res, next) : next();
 });
@@ -733,7 +736,7 @@ app.put('/api/groups/:id/expenses/:expenseId', (req, res) => {
   const expenseId = req.params.expenseId;
 
   const existing = db
-    .prepare('SELECT id, version FROM expenses WHERE id = ? AND group_id = ? AND deleted_at IS NULL')
+    .prepare('SELECT id, version, receipt FROM expenses WHERE id = ? AND group_id = ? AND deleted_at IS NULL')
     .get(expenseId, groupId);
   if (!existing) return res.status(404).json({ error: '找不到這筆支出' });
   if (!Number.isSafeInteger(req.body?.version) || req.body.version < 1) {
@@ -745,29 +748,61 @@ app.put('/api/groups/:id/expenses/:expenseId', (req, res) => {
   const parsed = validateExpenseInput(groupId, req.body);
   if (parsed.error) return res.status(400).json({ error: parsed.error });
   const expense = parsed.value;
-
-  const saved = db.transaction(() => {
-    const result = db.prepare(
-      `UPDATE expenses SET payer_id = ?, description = ?, amount = ?, category = ?, expense_date = ?,
-       note = ?, kind = ?, version = version + 1 WHERE id = ? AND version = ?`
-    ).run(
-      expense.payerId, expense.description, expense.amount, expense.category,
-      expense.expenseDate, expense.note, expense.kind, expenseId, existing.version
-    );
-    if (result.changes === 0) return false;
-    db.prepare('DELETE FROM expense_splits WHERE expense_id = ?').run(expenseId);
-    const ins = db.prepare(
-      'INSERT INTO expense_splits (expense_id, member_id, amount) VALUES (?, ?, ?)'
-    );
-    for (const split of expense.splits) {
-      ins.run(expenseId, split.memberId, centsToMoney(split.amountCents));
+  const replacingReceipt = req.body?.receiptDataUrl !== undefined;
+  if (req.body?.removeReceipt !== undefined && typeof req.body.removeReceipt !== 'boolean') {
+    return res.status(400).json({ error: '移除單據設定格式不正確' });
+  }
+  const removingReceipt = req.body?.removeReceipt === true;
+  if (replacingReceipt && removingReceipt) {
+    return res.status(400).json({ error: '不能同時替換與移除單據' });
+  }
+  let nextReceipt = existing.receipt;
+  if (replacingReceipt) {
+    const decoded = decodeReceipt(req.body.receiptDataUrl);
+    if (decoded.error) return res.status(400).json({ error: decoded.error });
+    nextReceipt = `${expenseId}-${uid()}.${decoded.extension}`;
+    try {
+      writeReceiptAtomic(nextReceipt, decoded.buffer);
+    } catch (error) {
+      unlinkReceipt(nextReceipt);
+      throw error;
     }
-    return true;
-  })();
+  } else if (removingReceipt) {
+    nextReceipt = null;
+  }
+
+  let saved;
+  try {
+    saved = db.transaction(() => {
+      const result = db.prepare(
+        `UPDATE expenses SET payer_id = ?, description = ?, amount = ?, category = ?, expense_date = ?,
+         note = ?, kind = ?, receipt = ?, version = version + 1 WHERE id = ? AND version = ?`
+      ).run(
+        expense.payerId, expense.description, expense.amount, expense.category,
+        expense.expenseDate, expense.note, expense.kind, nextReceipt, expenseId, existing.version
+      );
+      if (result.changes === 0) return false;
+      db.prepare('DELETE FROM expense_splits WHERE expense_id = ?').run(expenseId);
+      const ins = db.prepare(
+        'INSERT INTO expense_splits (expense_id, member_id, amount) VALUES (?, ?, ?)'
+      );
+      for (const split of expense.splits) {
+        ins.run(expenseId, split.memberId, centsToMoney(split.amountCents));
+      }
+      return true;
+    })();
+  } catch (error) {
+    if (replacingReceipt) unlinkReceipt(nextReceipt);
+    throw error;
+  }
   if (!saved) {
+    if (replacingReceipt) unlinkReceipt(nextReceipt);
     return res.status(409).json({ error: '此紀錄已在其他裝置更新，請重新開啟後再編輯' });
   }
-  res.json({ ok: true, version: existing.version + 1 });
+  if ((replacingReceipt || removingReceipt) && existing.receipt !== nextReceipt) {
+    unlinkReceipt(existing.receipt);
+  }
+  res.json({ ok: true, version: existing.version + 1, receipt: nextReceipt });
 });
 
 // 上傳／替換單據照片（base64 data URL）
