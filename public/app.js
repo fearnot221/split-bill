@@ -976,6 +976,15 @@ function applyAiDraft(result) {
   }
   showAiReview(result);
   setSmartFeedback('草稿已建立，請確認後儲存');
+  clearTimeout(modalFocusTimer);
+  const focusTarget = !draft.description
+    ? $('#exp-desc')
+    : !draft.amount
+      ? $('#exp-amount')
+      : draft.kind === 'transfer' && !draft.transferToId
+        ? $('#exp-transfer-to')
+        : $('.modal-actions button[type="submit"]');
+  modalFocusTimer = setTimeout(() => focusTarget.focus(), 50);
 }
 
 async function analyzeSmartEntry() {
@@ -1123,6 +1132,7 @@ let expensePersisted = false;
 let expenseFormBaseline = '';
 let modalReturnFocus = null;
 let expenseSubmitLabel = '儲存';
+let modalFocusTimer = null;
 
 function expenseDraftSignature() {
   return JSON.stringify({
@@ -1299,7 +1309,8 @@ function openExpenseModal(expense = null) {
   modal.classList.remove('hidden', 'closing');
   $('#view-group').inert = true;
   document.body.classList.add('modal-open');
-  setTimeout(() => $('#exp-desc').focus(), 50);
+  clearTimeout(modalFocusTimer);
+  modalFocusTimer = setTimeout(() => $('#exp-desc').focus(), 50);
 }
 
 function closeExpenseModal(force = false) {
@@ -1307,6 +1318,7 @@ function closeExpenseModal(force = false) {
   if (!force && hasUnsavedExpenseChanges()
     && !confirm('尚未儲存的變更會遺失，確定關閉？')) return false;
   const modal = $('#modal-expense');
+  clearTimeout(modalFocusTimer);
   modal.classList.add('closing');
   modal._closeTimer = setTimeout(() => {
     modal.classList.add('hidden');
