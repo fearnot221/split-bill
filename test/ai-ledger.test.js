@@ -179,6 +179,25 @@ test('local parser understands guarded Chinese money amounts', () => {
   assert.equal(peopleOnly.amount, null);
 });
 
+test('local parser handles k shorthand without truncating units', () => {
+  for (const [text, expected] of [
+    ['晚餐1.2k跟小明均分', 1200],
+    ['NT$1.5K旅館，我跟小明均分', 1500],
+    ['車票0.08k我付不分攤', 80],
+  ]) {
+    const draft = normalizeDraft(
+      localParse(text, { ...context, today: '2026-07-14', hasReceipt: false }),
+      { ...context, today: '2026-07-14', sourceText: text }
+    );
+    assert.equal(draft.amount, expected, text);
+  }
+  const weight = normalizeDraft(
+    localParse('買1kg蘋果', { ...context, today: '2026-07-14', hasReceipt: false }),
+    { ...context, today: '2026-07-14', sourceText: '買1kg蘋果' }
+  );
+  assert.equal(weight.amount, null);
+});
+
 test('local parser handles everyone, income, and no-split phrases', () => {
   const everyoneText = '晚餐 1,500 大家均分我付';
   const everyone = normalizeDraft(
