@@ -2,10 +2,11 @@
 <html lang="zh-Hant">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <meta name="theme-color" content="#f5f3ee">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content">
+  <meta name="theme-color" content="#f5f3ee" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#191813" media="(prefers-color-scheme: dark)">
   <title>分帳小工具 — 記帳分帳</title>
-  <link rel="stylesheet" href="style.css?v=22">
+  <link rel="stylesheet" href="style.css?v=25">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%2344705a'/><text x='50' y='72' font-size='60' text-anchor='middle' fill='white' font-family='Helvetica,Arial,sans-serif' font-weight='bold'>$</text></svg>">
 </head>
 <body>
@@ -46,7 +47,7 @@
             <span id="smart-mode" class="smart-mode">準備中</span>
           </div>
           <label class="visually-hidden" for="smart-input">記帳內容</label>
-          <textarea id="smart-input" class="smart-input" rows="3" maxlength="2000"
+          <textarea id="smart-input" class="smart-input" rows="3" maxlength="2000" enterkeyhint="send"
             placeholder="例如：昨天晚餐 1,280，我付的，我跟小明、小美均分"></textarea>
           <div id="smart-receipt" class="smart-receipt hidden">
             <button type="button" id="btn-smart-receipt-view" class="receipt-preview"
@@ -81,22 +82,30 @@
           <p class="smart-privacy">啟用 AI 時，這次輸入的文字與單據會傳送至設定的 AI 服務供應商。</p>
         </section>
         <div class="filter-bar">
-          <label class="visually-hidden" for="filter-text">搜尋紀錄</label>
-          <input type="search" id="filter-text" placeholder="搜尋說明、付款人…" autocomplete="off">
-          <div class="seg filter-kind" id="filter-kind" aria-label="紀錄類型">
-            <button type="button" class="seg-btn active" data-kind="all" aria-pressed="true">全部</button>
-            <button type="button" class="seg-btn" data-kind="expense" aria-pressed="false">支出</button>
-            <button type="button" class="seg-btn" data-kind="income" aria-pressed="false">收入</button>
-            <button type="button" class="seg-btn" data-kind="transfer" aria-pressed="false">轉帳</button>
+          <div class="filter-search-row">
+            <label class="visually-hidden" for="filter-text">搜尋紀錄</label>
+            <input type="search" id="filter-text" placeholder="搜尋說明、付款人…" autocomplete="off">
+            <button type="button" id="btn-toggle-filters" class="icon-btn filter-toggle"
+              aria-label="展開進階篩選" aria-expanded="false" aria-controls="filter-options" title="篩選">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16"/><path d="M7 12h10"/><path d="M10 19h4"/></svg>
+            </button>
           </div>
-          <div class="chip-row" id="filter-cats"></div>
+          <div id="filter-options" class="filter-options">
+            <div class="seg filter-kind" id="filter-kind" aria-label="紀錄類型">
+              <button type="button" class="seg-btn active" data-kind="all" aria-pressed="true">全部</button>
+              <button type="button" class="seg-btn" data-kind="expense" aria-pressed="false">支出</button>
+              <button type="button" class="seg-btn" data-kind="income" aria-pressed="false">收入</button>
+              <button type="button" class="seg-btn" data-kind="transfer" aria-pressed="false">轉帳</button>
+            </div>
+            <div class="chip-row" id="filter-cats"></div>
+          </div>
           <div id="filter-summary" class="filter-summary hidden" role="status">
             <span id="filter-count"></span>
             <button type="button" id="btn-clear-filters" class="pill-btn">清除篩選</button>
           </div>
         </div>
         <ul id="expense-list" class="expense-list"></ul>
-        <p id="expense-empty" class="empty-hint hidden">還沒有任何紀錄，點右下角「＋」新增第一筆吧！</p>
+        <p id="expense-empty" class="empty-hint hidden">還沒有任何紀錄</p>
       </section>
 
       <!-- 結算 -->
@@ -162,7 +171,7 @@
 
     </main>
 
-    <button id="btn-add-expense" class="fab" aria-label="新增紀錄">
+    <button id="btn-add-expense" class="fab" aria-label="手動新增紀錄" title="手動新增">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
     </button>
 
@@ -199,6 +208,7 @@
         </div>
         <div id="ai-review" class="ai-review hidden" role="status">
           <div id="ai-review-title" class="ai-review-title"></div>
+          <p id="ai-review-summary" class="ai-review-summary"></p>
           <ul id="ai-review-warnings"></ul>
         </div>
         <label>項目說明
@@ -231,8 +241,8 @@
         <div id="split-toolbar" class="split-toolbar">
           <button type="button" id="split-toggle-all" class="pill-btn">全不選</button>
         </div>
+        <p id="split-remain" class="hint-block hidden" role="status" aria-live="polite" tabindex="-1"></p>
         <ul id="split-members" class="split-list"></ul>
-        <p id="split-remain" class="hint-block hidden"></p>
         <label>備註（選填）
           <textarea id="exp-note" rows="2" maxlength="500" placeholder="例如：跟誰去、發票號碼…"></textarea>
         </label>
@@ -256,6 +266,6 @@
 
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
-  <script src="app.js?v=42"></script>
+  <script src="app.js?v=45"></script>
 </body>
 </html>

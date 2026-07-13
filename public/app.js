@@ -67,6 +67,44 @@ let smartAnalyzeController = null;
 let smartReceiptTask = null;
 let smartReceiptSequence = 0;
 let cachedSafetySessionId = null;
+let smartInputComposing = false;
+let smartInputCompositionJustEnded = false;
+let visualViewportBaseline = window.visualViewport?.height || window.innerHeight;
+let visualViewportWidth = window.innerWidth;
+let focusVisibilityTimer = null;
+
+function keepFocusedControlVisible() {
+  clearTimeout(focusVisibilityTimer);
+  focusVisibilityTimer = setTimeout(() => {
+    if (!document.body.classList.contains('keyboard-open')) return;
+    const active = document.activeElement;
+    if (!active?.matches('input, select, textarea')) return;
+    active.scrollIntoView({ block: 'center', inline: 'nearest' });
+  }, 80);
+}
+
+function syncVisualViewport() {
+  const viewport = window.visualViewport;
+  const height = viewport?.height || window.innerHeight;
+  const offsetTop = viewport?.offsetTop || 0;
+  if (Math.abs(window.innerWidth - visualViewportWidth) > 80) {
+    visualViewportWidth = window.innerWidth;
+    visualViewportBaseline = height;
+  } else {
+    visualViewportBaseline = Math.max(visualViewportBaseline, height);
+  }
+  const keyboardOpen = window.innerWidth <= 767 && visualViewportBaseline - height > 140;
+  document.body.classList.toggle('keyboard-open', keyboardOpen);
+  document.documentElement.style.setProperty('--visual-viewport-height', `${height}px`);
+  document.documentElement.style.setProperty('--visual-viewport-top', `${offsetTop}px`);
+  if (keyboardOpen) keepFocusedControlVisible();
+}
+
+syncVisualViewport();
+window.addEventListener('resize', syncVisualViewport);
+window.visualViewport?.addEventListener('resize', syncVisualViewport);
+window.visualViewport?.addEventListener('scroll', syncVisualViewport);
+document.addEventListener('focusin', keepFocusedControlVisible);
 
 /* ===== 工具 ===== */
 function fmt(n) {
@@ -275,16 +313,20 @@ function expenseItemHtml(e) {
     ? `${escapeHtml(memberName(e.payer_id))} ${e.category === '還款' ? '還款' : '匯款'}給 ${names}`
     : `${escapeHtml(memberName(e.payer_id))} ${isIncome(e) ? '收款' : '付款'}｜分攤：${names}`;
   const kindCls = isIncome(e) ? ' income' : isTransfer(e) ? ' transfer' : '';
+  const description = escapeHtml(e.description);
+  const amount = escapeHtml(`${isIncome(e) ? '+' : ''}${fmt(e.amount)}`);
   return `
     <li class="expense-item${kindCls}" data-id="${e.id}">
-      ${catIcon(e.category)}
-      <div class="expense-info">
-        <div class="expense-desc">${escapeHtml(e.description)}${e.receipt ? `<span class="clip-ico" title="附有單據">${ICONS.clip}</span>` : ''}</div>
-        <div class="expense-meta">${meta}</div>
-        ${e.note ? `<div class="expense-note">${escapeHtml(e.note)}</div>` : ''}
-      </div>
-      <span class="expense-amount">${isIncome(e) ? '+' : ''}${fmt(e.amount)}</span>
-      <button class="expense-del" title="刪除">${ICONS.trash}</button>
+      <button type="button" class="expense-open" aria-label="編輯帳目：${description}，${amount}">
+        ${catIcon(e.category)}
+        <span class="expense-info">
+          <span class="expense-desc">${description}${e.receipt ? `<span class="clip-ico" title="附有單據">${ICONS.clip}</span>` : ''}</span>
+          <span class="expense-meta">${meta}</span>
+          ${e.note ? `<span class="expense-note">${escapeHtml(e.note)}</span>` : ''}
+        </span>
+        <span class="expense-amount">${amount}</span>
+      </button>
+      <button type="button" class="expense-del" aria-label="刪除「${description}」" title="刪除">${ICONS.trash}</button>
     </li>`;
 }
 
@@ -292,13 +334,19 @@ function renderExpenses() {
   const expenses = state.data.expenses.filter(matchesFilter);
   const list = $('#expense-list');
   const empty = $('#expense-empty');
+  const hasExpenses = state.data.expenses.length > 0;
+  $('.filter-bar').classList.toggle('hidden', !hasExpenses);
   empty.classList.toggle('hidden', expenses.length > 0);
-  empty.textContent = state.data.expenses.length === 0
-    ? '還沒有任何紀錄，點右下角「＋」新增第一筆吧！'
+  empty.textContent = !hasExpenses
+    ? '還沒有任何紀錄'
     : '沒有符合條件的紀錄';
   const filtering = !!state.filterText.trim()
     || state.filterCat !== '全部'
     || state.filterKind !== 'all';
+  const filterToggle = $('#btn-toggle-filters');
+  const filtersExpanded = $('#filter-options').classList.contains('expanded');
+  filterToggle.classList.toggle('active', filtering);
+  filterToggle.setAttribute('aria-label', `${filtersExpanded ? '收合' : '展開'}進階篩選${filtering ? '（已套用）' : ''}`);
   $('#filter-summary').classList.toggle('hidden', !filtering);
   $('#filter-count').textContent = `顯示 ${expenses.length} / ${state.data.expenses.length} 筆`;
 
@@ -329,13 +377,14 @@ function renderExpenses() {
 
 // 由點擊當下的最新 state 取紀錄，避免 HTML 未重建時沿用舊資料閉包。
 $('#expense-list').addEventListener('click', async (ev) => {
-  const item = ev.target.closest('.expense-item');
-  if (!item) return;
+  const action = ev.target.closest('.expense-open, .expense-del');
+  if (!action) return;
+  const item = action.closest('.expense-item');
   const expense = state.data?.expenses.find((e) => e.id === item.dataset.id);
   if (!expense) return;
 
-  if (ev.target.closest('.expense-del')) {
-    const deleteButton = ev.target.closest('.expense-del');
+  if (action.matches('.expense-del')) {
+    const deleteButton = action;
     if (!confirm(`確定刪除「${expense.description}」？`)) return;
     deleteButton.disabled = true;
     try {
@@ -622,6 +671,14 @@ $$('.tab-btn').forEach((btn) => {
 });
 
 /* ===== 搜尋 / 篩選 ===== */
+$('#btn-toggle-filters').addEventListener('click', () => {
+  const options = $('#filter-options');
+  const expanded = !options.classList.contains('expanded');
+  options.classList.toggle('expanded', expanded);
+  $('#btn-toggle-filters').setAttribute('aria-expanded', String(expanded));
+  renderExpenses();
+});
+
 $('#filter-text').addEventListener('input', (ev) => {
   state.filterText = ev.target.value;
   renderExpenses();
@@ -650,6 +707,8 @@ $('#btn-clear-filters').addEventListener('click', () => {
   state.filterCat = '全部';
   state.filterKind = 'all';
   $('#filter-text').value = '';
+  $('#filter-options').classList.remove('expanded');
+  $('#btn-toggle-filters').setAttribute('aria-expanded', 'false');
   syncKindFilter();
   renderFilterChips();
   renderExpenses();
@@ -870,11 +929,15 @@ function setupSmartSpeechInput() {
   const button = $('#btn-smart-voice');
   button.classList.remove('hidden');
   const recognition = new SpeechRecognition();
+  let receivedFinalSpeech = false;
+  let speechErrored = false;
   smartSpeechRecognition = recognition;
   recognition.lang = 'zh-TW';
   recognition.interimResults = true;
   recognition.continuous = false;
   recognition.onstart = () => {
+    receivedFinalSpeech = false;
+    speechErrored = false;
     button.setAttribute('aria-pressed', 'true');
     setSmartFeedback('正在聽取記帳內容…');
   };
@@ -887,6 +950,7 @@ function setupSmartSpeechInput() {
       else interimText += transcript;
     }
     if (finalText) {
+      receivedFinalSpeech = true;
       const input = $('#smart-input');
       input.value = `${input.value}${input.value.trim() ? '。' : ''}${finalText}`;
       resizeSmartInput();
@@ -896,13 +960,21 @@ function setupSmartSpeechInput() {
     if (interimText) setSmartFeedback(`聽到：${interimText}`);
   };
   recognition.onerror = (event) => {
+    speechErrored = true;
     if (event.error === 'aborted') return;
     const message = event.error === 'not-allowed'
       ? '麥克風權限未開啟'
       : event.error === 'no-speech' ? '沒有聽到語音，請再試一次' : '語音辨識失敗';
     setSmartFeedback(message, true);
   };
-  recognition.onend = () => button.setAttribute('aria-pressed', 'false');
+  recognition.onend = () => {
+    button.setAttribute('aria-pressed', 'false');
+    if (speechErrored || smartAnalyzing) return;
+    setSmartFeedback(
+      receivedFinalSpeech ? '已加入語音內容' : '沒有取得語音內容，請再試一次',
+      !receivedFinalSpeech,
+    );
+  };
   button.addEventListener('click', () => {
     if (button.getAttribute('aria-pressed') === 'true') recognition.stop();
     else {
@@ -979,6 +1051,42 @@ $('#smart-recent-list').addEventListener('click', (ev) => {
   setSmartFeedback('已帶入最近紀錄，請確認後儲存');
 });
 
+function selectedOptionText(selector) {
+  const select = $(selector);
+  return select?.selectedOptions?.[0]?.textContent?.trim() || '未選擇';
+}
+
+function syncAiReviewSummary() {
+  const summary = $('#ai-review-summary');
+  if (!aiDraftActive || !summary) return;
+  const payerLabel = expenseKind === 'transfer'
+    ? '匯款'
+    : expenseKind === 'income' ? '收款' : '付款';
+  const parts = [`${payerLabel}：${selectedOptionText('#exp-payer')}`];
+  if (expenseKind === 'transfer') {
+    parts.push(`匯給：${selectedOptionText('#exp-transfer-to')}`);
+  } else if (splitMode === 'none') {
+    parts.push('分帳：不分攤');
+  } else {
+    const checkedRows = [...$$('#split-members > li')]
+      .filter((row) => row.querySelector('input[type="checkbox"]')?.checked);
+    if (splitMode === 'custom') {
+      const allocations = checkedRows.map((row) => {
+        const name = row.querySelector('.split-name')?.textContent?.trim() || '?';
+        const amount = Number(row.querySelector('.split-amount-input')?.value) || 0;
+        return `${name} ${fmt(amount)}`;
+      });
+      parts.push(`自訂：${allocations.length ? allocations.join('、') : '尚未選擇成員'}`);
+    } else {
+      const names = checkedRows.map((row) => row.querySelector('.split-name')?.textContent?.trim());
+      parts.push(`均分：${names.length ? names.join('、') : '尚未選擇成員'}`);
+    }
+  }
+  const hasReceipt = !!receiptState.pending || (!!receiptState.existing && !receiptState.removed);
+  if (hasReceipt) parts.push('已附單據');
+  summary.textContent = parts.join(' · ');
+}
+
 function showAiReview(result) {
   const { draft } = result;
   const title = result.provider === 'openai'
@@ -997,6 +1105,7 @@ function showAiReview(result) {
   review.classList.toggle('notice', (result.notices || []).length > 0);
   review.classList.toggle('needs-attention', (draft.warnings || []).length > 0 || !draft.ready);
   review.classList.remove('hidden');
+  syncAiReviewSummary();
 }
 
 function aiDraftFocusTarget(draft) {
@@ -1055,7 +1164,9 @@ function applyAiDraft(result) {
   setSmartFeedback('草稿已建立，請確認後儲存');
   clearTimeout(modalFocusTimer);
   const focusTarget = aiDraftFocusTarget(draft);
-  modalFocusTimer = setTimeout(() => focusTarget.focus(), 50);
+  modalFocusTimer = setTimeout(() => {
+    focusTarget.focus({ preventScroll: focusTarget.matches('.modal-actions button') });
+  }, 50);
 }
 
 async function analyzeSmartEntry() {
@@ -1128,8 +1239,20 @@ $('#btn-smart-receipt-view').addEventListener('click', () => {
   openReceiptPreview(smartReceiptDataUrl);
 });
 $('#btn-smart-analyze').addEventListener('click', analyzeSmartEntry);
+$('#smart-input').addEventListener('compositionstart', () => {
+  smartInputComposing = true;
+  smartInputCompositionJustEnded = false;
+});
+$('#smart-input').addEventListener('compositionend', () => {
+  smartInputComposing = false;
+  smartInputCompositionJustEnded = true;
+  setTimeout(() => { smartInputCompositionJustEnded = false; }, 0);
+});
 $('#smart-input').addEventListener('keydown', (ev) => {
-  if ((ev.metaKey || ev.ctrlKey) && ev.key === 'Enter') {
+  if (ev.isComposing || smartInputComposing || smartInputCompositionJustEnded || ev.keyCode === 229) return;
+  const mobileSend = matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0;
+  if (ev.key === 'Enter' && !ev.shiftKey
+    && (ev.metaKey || ev.ctrlKey || mobileSend)) {
     ev.preventDefault();
     analyzeSmartEntry();
   }
@@ -1309,6 +1432,7 @@ function setKind(kind) {
   } else {
     setSplitMode(splitMode); // 恢復分攤區塊的顯示狀態
   }
+  syncAiReviewSummary();
 }
 
 $('#kind-expense').addEventListener('click', () => setKind('expense'));
@@ -1326,11 +1450,14 @@ function renderTransferTargets(selected) {
   sel.innerHTML = targets.map((m) =>
     `<option value="${m.id}">${escapeHtml(m.name)}</option>`).join('');
   if (targets.some((m) => m.id === prev)) sel.value = prev;
+  syncAiReviewSummary();
 }
 
 $('#exp-payer').addEventListener('change', () => {
   if (expenseKind === 'transfer') renderTransferTargets();
+  syncAiReviewSummary();
 });
+$('#exp-transfer-to').addEventListener('change', syncAiReviewSummary);
 
 function setSplitMode(mode) {
   splitMode = mode;
@@ -1355,6 +1482,7 @@ function openExpenseModal(expense = null) {
   $('.modal-actions button[type="submit"]').textContent = expenseSubmitLabel;
   $('#ai-review').classList.add('hidden');
   $('#ai-review').classList.remove('notice', 'needs-attention');
+  $('#ai-review-summary').textContent = '';
   $('#ai-review-warnings').replaceChildren();
   modalReturnFocus = document.activeElement;
   const { members } = state.data;
@@ -1366,6 +1494,7 @@ function openExpenseModal(expense = null) {
   receiptTask = null;
 
   $('#form-expense').reset();
+  $('#form-expense').scrollTop = 0;
   $('#exp-desc').value = expense?.description || '';
   $('#exp-amount').value = expense ? expense.amount : '';
   $('#exp-date').value = expense?.expense_date || todayLocal();
@@ -1392,7 +1521,8 @@ function openExpenseModal(expense = null) {
       <span class="split-name">${escapeHtml(m.name)}</span>
       <span class="split-amount-label">—</span>
       <input type="number" class="split-amount-input hidden" min="0" step="0.01"
-        max="9999999999.99" inputmode="decimal" placeholder="0" value="${splitMap.get(m.id) ?? ''}">
+        max="9999999999.99" inputmode="decimal" placeholder="0"
+        aria-label="${escapeHtml(m.name)} 分攤金額" value="${splitMap.get(m.id) ?? ''}">
     </li>`).join('');
 
   $('#split-members').querySelectorAll('input').forEach((inp) => {
@@ -1441,8 +1571,11 @@ function openExpenseModal(expense = null) {
   modal.classList.remove('hidden', 'closing');
   $('#view-group').inert = true;
   document.body.classList.add('modal-open');
+  $('#form-expense').scrollTop = 0;
   clearTimeout(modalFocusTimer);
-  modalFocusTimer = setTimeout(() => $('#exp-desc').focus(), 50);
+  if (!expense || !matchMedia('(pointer: coarse)').matches) {
+    modalFocusTimer = setTimeout(() => $('#exp-desc').focus(), 50);
+  }
 }
 
 function closeExpenseModal(force = false) {
@@ -1482,6 +1615,7 @@ function renderReceiptUI() {
   $('#btn-receipt-view').classList.toggle('hidden', !hasImage);
   $('#btn-receipt-remove').classList.toggle('hidden', !hasImage);
   $('.modal-actions button[type="submit"]').disabled = expenseSubmitting || !!receiptTask;
+  syncAiReviewSummary();
 }
 
 // 縮到最長邊 1600px 的 JPEG，避免上傳原始大圖
@@ -1624,19 +1758,34 @@ $('#split-toggle-all').addEventListener('click', () => {
 });
 
 function updateSplitPreview() {
-  if (expenseKind === 'transfer') return;
+  if (expenseKind === 'transfer') {
+    syncAiReviewSummary();
+    return;
+  }
   updateSplitToggleAll();
+  const el = $('#split-remain');
+  el.classList.remove('error');
+  $$('#split-members .split-amount-input').forEach((input) => input.removeAttribute('aria-invalid'));
   if (splitMode === 'none') {
-    const el = $('#split-remain');
     el.classList.remove('hidden');
     el.textContent = expenseKind === 'income'
       ? '這筆屬於收款人自己，不會影響任何人的結餘'
       : '這筆由付款人自行承擔，不會影響任何人的結餘';
+    syncAiReviewSummary();
     return;
   }
   const amount = Number($('#exp-amount').value) || 0;
   const rows = [...$('#split-members').children];
   const checkedRows = rows.filter((r) => r.querySelector('input[type=checkbox]').checked);
+
+  if (checkedRows.length === 0) {
+    rows.forEach((row) => { row.querySelector('.split-amount-label').textContent = '—'; });
+    el.classList.remove('hidden');
+    el.classList.add('error');
+    el.textContent = '請至少選擇一位分攤成員';
+    syncAiReviewSummary();
+    return;
+  }
 
   if (splitMode === 'equal') {
     const shares = equalSplit(amount, checkedRows.length);
@@ -1650,7 +1799,7 @@ function updateSplitPreview() {
         label.textContent = '—';
       }
     });
-    $('#split-remain').classList.add('hidden');
+    el.classList.add('hidden');
   } else {
     let assigned = 0;
     rows.forEach((r) => {
@@ -1659,14 +1808,15 @@ function updateSplitPreview() {
       if (checked) assigned += Number(inp.value) || 0;
     });
     const remain = Math.round((amount - assigned) * 100) / 100;
-    const el = $('#split-remain');
     el.classList.remove('hidden');
+    el.classList.toggle('error', remain !== 0);
     el.textContent = remain === 0
       ? '分攤金額剛好等於總金額'
       : remain > 0
         ? `還有 ${fmt(remain)} 未分配`
         : `超出總金額 ${fmt(-remain)}`;
   }
+  syncAiReviewSummary();
 }
 
 $('#exp-amount').addEventListener('input', updateSplitPreview);
@@ -1714,6 +1864,17 @@ window.addEventListener('beforeunload', (ev) => {
   ev.returnValue = '';
 });
 
+function showSplitFormError(message, focusTarget) {
+  const feedback = $('#split-remain');
+  feedback.textContent = message;
+  feedback.classList.remove('hidden');
+  feedback.classList.add('error');
+  const target = focusTarget || feedback;
+  if (target.matches?.('.split-amount-input')) target.setAttribute('aria-invalid', 'true');
+  target.focus({ preventScroll: true });
+  target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+}
+
 $('#form-expense').addEventListener('submit', async (ev) => {
   ev.preventDefault();
   if (expenseSubmitting || expensePersisted) return;
@@ -1740,7 +1901,10 @@ $('#form-expense').addEventListener('submit', async (ev) => {
     const rows = [...$('#split-members').children];
     const checkedRows = rows.filter((r) => r.querySelector('input[type=checkbox]').checked);
 
-    if (splitMode !== 'none' && checkedRows.length === 0) return toast('請至少勾選一位分攤成員');
+    if (splitMode !== 'none' && checkedRows.length === 0) {
+      showSplitFormError('請至少選擇一位分攤成員', $('#split-toggle-all'));
+      return;
+    }
 
     let splits;
     if (splitMode === 'none') {
@@ -1750,13 +1914,24 @@ $('#form-expense').addEventListener('submit', async (ev) => {
       const shares = equalSplit(amount, checkedRows.length);
       splits = checkedRows.map((r, i) => ({ memberId: r.dataset.id, amount: shares[i] }));
     } else {
-      splits = checkedRows
-        .map((r) => ({
+      const splitRows = checkedRows.map((r) => ({
+        row: r,
+        split: {
           memberId: r.dataset.id,
           amount: Number(r.querySelector('.split-amount-input').value) || 0,
-        }))
-        .filter((s) => s.amount > 0);
-      if (splits.length === 0) return toast('請填寫分攤金額');
+        },
+      }));
+      const missing = splitRows.find(({ split }) => split.amount <= 0);
+      if (missing) {
+        showSplitFormError('每位已選成員都需要填寫分攤金額', missing.row.querySelector('.split-amount-input'));
+        return;
+      }
+      splits = splitRows.map(({ split }) => split);
+      const assignedCents = splits.reduce((sum, split) => sum + Math.round(split.amount * 100), 0);
+      if (assignedCents !== Math.round(amount * 100)) {
+        showSplitFormError('自訂分攤合計必須等於總金額', splitRows[0].row.querySelector('.split-amount-input'));
+        return;
+      }
     }
 
     payload = {
