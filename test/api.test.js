@@ -215,6 +215,45 @@ test('API protects access, validates money, and rejects stale updates', async (t
     assert.equal(oversized.response.status, 413);
   });
 
+  await t.test('creates a new expense and receipt atomically', async () => {
+    const image = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
+    const body = {
+      payerId,
+      description: '原子單據測試',
+      amount: 2,
+      category: '其他',
+      expenseDate: '2026-07-13',
+      kind: 'income',
+      splits: [{ memberId: payerId, amount: 2 }],
+    };
+    const invalid = await request(`/api/groups/${groupId}/expenses-with-receipt`, {
+      method: 'POST',
+      body: {
+        ...body,
+        description: '不應建立',
+        receiptDataUrl: `data:image/jpeg;base64,${Buffer.from('not an image').toString('base64')}`,
+      },
+    });
+    assert.equal(invalid.response.status, 400);
+
+    const created = await request(`/api/groups/${groupId}/expenses-with-receipt`, {
+      method: 'POST',
+      body: { ...body, receiptDataUrl: `data:image/jpeg;base64,${image.toString('base64')}` },
+    });
+    assert.equal(created.response.status, 200);
+    assert.equal(created.body.version, 1);
+    assert.match(created.body.receipt, /\.jpg$/);
+    assert.equal(
+      (await fs.stat(path.join(tempDir, 'uploads', created.body.receipt))).size,
+      image.length
+    );
+
+    const ledger = await request(`/api/groups/${groupId}`);
+    const saved = ledger.body.expenses.find((expense) => expense.id === created.body.expenseId);
+    assert.equal(saved.receipt, created.body.receipt);
+    assert.equal(ledger.body.expenses.some((expense) => expense.description === '不應建立'), false);
+  });
+
   await t.test('settles exactly one cent and preserves the configured currency', async () => {
     const created = await request(`/api/groups/${groupId}/expenses`, {
       method: 'POST',

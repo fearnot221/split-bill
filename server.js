@@ -112,6 +112,9 @@ app.use('/api/groups/:id/expenses/:expenseId/receipt', (req, res, next) => {
 app.use('/api/groups/:id/ai/parse', (req, res, next) => {
   return req.method === 'POST' ? aiJson(req, res, next) : next();
 });
+app.post('/api/groups/:id/expenses-with-receipt', receiptJson, (req, res) => {
+  createExpense(req, res, true);
+});
 app.use(regularJson);
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/uploads', express.static(UPLOAD_DIR, {
@@ -627,8 +630,7 @@ app.delete('/api/groups/:id/categories/:categoryId', requireAdmin, (req, res) =>
   res.json({ ok: true });
 });
 
-// 新增支出／收入
-app.post('/api/groups/:id/expenses', (req, res) => {
+function createExpense(req, res, withReceipt = false) {
   const groupId = req.params.id;
   if (!db.prepare('SELECT 1 FROM groups WHERE id = ?').get(groupId)) {
     return res.status(404).json({ error: '找不到帳本' });
@@ -638,22 +640,46 @@ app.post('/api/groups/:id/expenses', (req, res) => {
   const expense = parsed.value;
 
   const expenseId = uid();
-  db.transaction(() => {
-    db.prepare(
-      `INSERT INTO expenses (id, group_id, payer_id, description, amount, category, expense_date, note, kind)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(
-      expenseId, groupId, expense.payerId, expense.description, expense.amount,
-      expense.category, expense.expenseDate, expense.note, expense.kind
-    );
-    const ins = db.prepare(
-      'INSERT INTO expense_splits (expense_id, member_id, amount) VALUES (?, ?, ?)'
-    );
-    for (const split of expense.splits) {
-      ins.run(expenseId, split.memberId, centsToMoney(split.amountCents));
+  let receiptFilename = null;
+  if (withReceipt) {
+    const decoded = decodeReceipt(req.body?.receiptDataUrl);
+    if (decoded.error) return res.status(400).json({ error: decoded.error });
+    receiptFilename = `${expenseId}-${uid()}.${decoded.extension}`;
+    try {
+      writeReceiptAtomic(receiptFilename, decoded.buffer);
+    } catch (error) {
+      unlinkReceipt(receiptFilename);
+      throw error;
     }
-  })();
-  res.json({ expenseId, version: 1 });
+  }
+
+  try {
+    db.transaction(() => {
+      db.prepare(
+        `INSERT INTO expenses (
+          id, group_id, payer_id, description, amount, category, expense_date, note, kind, receipt
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        expenseId, groupId, expense.payerId, expense.description, expense.amount,
+        expense.category, expense.expenseDate, expense.note, expense.kind, receiptFilename
+      );
+      const ins = db.prepare(
+        'INSERT INTO expense_splits (expense_id, member_id, amount) VALUES (?, ?, ?)'
+      );
+      for (const split of expense.splits) {
+        ins.run(expenseId, split.memberId, centsToMoney(split.amountCents));
+      }
+    })();
+  } catch (error) {
+    if (receiptFilename) unlinkReceipt(receiptFilename);
+    throw error;
+  }
+  return res.json({ expenseId, version: 1, receipt: receiptFilename });
+}
+
+// 新增支出／收入
+app.post('/api/groups/:id/expenses', (req, res) => {
+  createExpense(req, res);
 });
 
 // 編輯支出／收入

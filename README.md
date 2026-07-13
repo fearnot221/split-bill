@@ -162,6 +162,7 @@ npm run verify
 - `POST /api/groups/:id/categories` — 新增類別
 - `DELETE /api/groups/:id/categories/:categoryId` — 刪除未使用類別（管理員）
 - `POST /api/groups/:id/expenses` — 新增支出
+- `POST /api/groups/:id/expenses-with-receipt` — 原子新增支出與單據
 - `GET /api/ai/status` — 取得 AI／本地解析模式
 - `POST /api/groups/:id/ai/parse` — 將文字與可選單據轉為待確認帳目草稿
 - `PUT /api/groups/:id/expenses/:expenseId` — 依版本編輯支出

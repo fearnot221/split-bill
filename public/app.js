@@ -1626,7 +1626,11 @@ $('#form-expense').addEventListener('submit', async (ev) => {
       });
       persistedVersion = saved.version;
     } else {
-      const saved = await api(`/api/groups/${state.groupId}/expenses`, {
+      if (receiptUpdate.pending) payload.receiptDataUrl = receiptUpdate.pending;
+      const endpoint = receiptUpdate.pending
+        ? `/api/groups/${state.groupId}/expenses-with-receipt`
+        : `/api/groups/${state.groupId}/expenses`;
+      const saved = await api(endpoint, {
         method: 'POST',
         body: JSON.stringify(payload),
       });
@@ -1639,7 +1643,7 @@ $('#form-expense').addEventListener('submit', async (ev) => {
     // 單據：有新照片就上傳（會自動替換舊的），被移除就刪掉
     let receiptError = null;
     try {
-      if (receiptUpdate.pending) {
+      if (receiptUpdate.pending && isEdit) {
         await api(`/api/groups/${state.groupId}/expenses/${expenseId}/receipt`, {
           method: 'POST',
           body: JSON.stringify({
