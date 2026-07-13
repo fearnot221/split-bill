@@ -224,6 +224,13 @@ function renderAll() {
   const { group, members, expenses, balances, settlements, total } = state.data;
 
   $('#group-name').textContent = group.name;
+  const exampleMembers = members
+    .filter((member) => !member.is_fund && member.id !== state.memberId)
+    .slice(0, 2)
+    .map((member) => member.name);
+  $('#smart-input').placeholder = exampleMembers.length
+    ? `例如：昨天晚餐 1,280，我付，我跟${exampleMembers.join('、')}均分`
+    : '例如：昨天晚餐 320，我付，不分攤';
   document.title = `${group.name} — 分帳小工具`;
 
   // 摘要列：整本帳的總支出／總收入／淨額（一趟旅行一本帳，不以月份切分）
