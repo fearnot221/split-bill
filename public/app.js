@@ -712,7 +712,8 @@ $('#btn-clear-filters').addEventListener('click', () => {
   syncKindFilter();
   renderFilterChips();
   renderExpenses();
-  $('#filter-text').focus();
+  const mobile = matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0;
+  (mobile ? $('#btn-toggle-filters') : $('#filter-text')).focus({ preventScroll: mobile });
 });
 
 /* ===== 一句記帳 ===== */
@@ -746,6 +747,7 @@ function setSmartAnalyzing(analyzing) {
   $('#smart-entry-title').closest('.smart-entry').setAttribute('aria-busy', String(analyzing));
   $('#smart-input').disabled = analyzing;
   $('#btn-smart-receipt').disabled = analyzing;
+  $('#btn-smart-camera').disabled = analyzing;
   $('#btn-smart-voice').disabled = analyzing;
   $('#btn-smart-receipt-remove').disabled = analyzing;
   syncSmartAnalyzeButton();
@@ -833,6 +835,7 @@ function clearSmartEntry() {
   $('#smart-input').value = '';
   resizeSmartInput();
   $('#smart-receipt-file').value = '';
+  $('#smart-camera-file').value = '';
   smartReceiptDataUrl = null;
   smartReceiptName = '';
   smartReceiptSequence += 1;
@@ -1217,13 +1220,17 @@ async function analyzeSmartEntry() {
   }
 }
 
-$('#btn-smart-receipt').addEventListener('click', () => $('#smart-receipt-file').click());
-$('#smart-receipt-file').addEventListener('change', async (ev) => {
+async function acceptSmartReceiptInput(ev) {
   try { await setSmartReceiptFile(ev.target.files[0]); } catch (error) {
     setSmartFeedback(error.message, true);
   }
   ev.target.value = '';
-});
+}
+
+$('#btn-smart-camera').addEventListener('click', () => $('#smart-camera-file').click());
+$('#smart-camera-file').addEventListener('change', acceptSmartReceiptInput);
+$('#btn-smart-receipt').addEventListener('click', () => $('#smart-receipt-file').click());
+$('#smart-receipt-file').addEventListener('change', acceptSmartReceiptInput);
 $('#btn-smart-receipt-remove').addEventListener('click', () => {
   smartReceiptSequence += 1;
   smartReceiptTask = null;

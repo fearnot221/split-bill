@@ -303,7 +303,7 @@ select {
 .smart-actions {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   margin-top: 10px;
 }
 .smart-actions .btn { width: auto; }
@@ -313,7 +313,8 @@ select {
   background: none;
   border-color: var(--red);
 }
-.smart-voice {
+.smart-voice,
+.smart-camera {
   width: 40px;
   height: 40px;
   border: 1px solid var(--rule-strong);
@@ -1151,7 +1152,21 @@ select {
     min-height: 44px;
   }
   .smart-actions .smart-voice { width: 44px; height: 44px; }
-  .filter-toggle { display: flex; }
+  #btn-toggle-filters {
+    display: flex;
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .filter-search-row input,
+  #btn-clear-filters { min-height: 44px; }
+  .smart-recents > div {
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .smart-recents > div::-webkit-scrollbar { display: none; }
+  .smart-recent { min-height: 44px; flex-shrink: 0; }
   .filter-options:not(.expanded) { display: none; }
   .kind-seg .seg-btn { min-height: 44px; }
   .filter-kind .seg-btn { min-height: 44px; }
