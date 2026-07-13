@@ -226,6 +226,16 @@ test('API protects access, validates money, and rejects stale updates', async (t
       kind: 'income',
       splits: [{ memberId: payerId, amount: 2 }],
     };
+    const invalidRequestId = await request(`/api/groups/${groupId}/expenses-with-receipt`, {
+      method: 'POST',
+      body: {
+        ...body,
+        clientRequestId: '',
+        receiptDataUrl: `data:image/jpeg;base64,${image.toString('base64')}`,
+      },
+    });
+    assert.equal(invalidRequestId.response.status, 400);
+
     const invalid = await request(`/api/groups/${groupId}/expenses-with-receipt`, {
       method: 'POST',
       body: {
@@ -238,7 +248,11 @@ test('API protects access, validates money, and rejects stale updates', async (t
 
     const created = await request(`/api/groups/${groupId}/expenses-with-receipt`, {
       method: 'POST',
-      body: { ...body, receiptDataUrl: `data:image/jpeg;base64,${image.toString('base64')}` },
+      body: {
+        ...body,
+        clientRequestId: 'b8cb82cb-82f6-4f5a-8861-02cce17d8176',
+        receiptDataUrl: `data:image/jpeg;base64,${image.toString('base64')}`,
+      },
     });
     assert.equal(created.response.status, 200);
     assert.equal(created.body.version, 1);
@@ -251,7 +265,25 @@ test('API protects access, validates money, and rejects stale updates', async (t
     const ledger = await request(`/api/groups/${groupId}`);
     const saved = ledger.body.expenses.find((expense) => expense.id === created.body.expenseId);
     assert.equal(saved.receipt, created.body.receipt);
+    assert.equal(saved.request_key, undefined);
     assert.equal(ledger.body.expenses.some((expense) => expense.description === '不應建立'), false);
+
+    const repeated = await request(`/api/groups/${groupId}/expenses-with-receipt`, {
+      method: 'POST',
+      body: {
+        ...body,
+        clientRequestId: 'b8cb82cb-82f6-4f5a-8861-02cce17d8176',
+        receiptDataUrl: `data:image/jpeg;base64,${image.toString('base64')}`,
+      },
+    });
+    assert.equal(repeated.response.status, 200);
+    assert.equal(repeated.body.expenseId, created.body.expenseId);
+    assert.equal(repeated.body.duplicate, true);
+    const afterRepeat = await request(`/api/groups/${groupId}`);
+    assert.equal(
+      afterRepeat.body.expenses.filter((expense) => expense.description === body.description).length,
+      1
+    );
   });
 
   await t.test('settles exactly one cent and preserves the configured currency', async () => {

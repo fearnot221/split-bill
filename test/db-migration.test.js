@@ -76,6 +76,7 @@ test('upgrades an older expenses table with current columns', (t) => {
   assert.ok(columns.has('note'));
   assert.ok(columns.has('kind'));
   assert.ok(columns.has('version'));
+  assert.ok(columns.has('request_key'));
   assert.equal(columns.get('version').dflt_value, '1');
   const splits = db.prepare(`SELECT member_id, amount FROM expense_splits
     WHERE expense_id = 'expense' ORDER BY member_id`).all();

@@ -40,7 +40,8 @@ CREATE TABLE IF NOT EXISTS expenses (
   receipt TEXT,
   note TEXT,
   kind TEXT NOT NULL DEFAULT 'expense',
-  version INTEGER NOT NULL DEFAULT 1
+  version INTEGER NOT NULL DEFAULT 1,
+  request_key TEXT
 );
 
 CREATE TABLE IF NOT EXISTS expense_splits (
@@ -107,6 +108,11 @@ if (!expenseCols.some((c) => c.name === 'kind')) {
 if (!expenseCols.some((c) => c.name === 'version')) {
   db.exec('ALTER TABLE expenses ADD COLUMN version INTEGER NOT NULL DEFAULT 1');
 }
+if (!expenseCols.some((c) => c.name === 'request_key')) {
+  db.exec('ALTER TABLE expenses ADD COLUMN request_key TEXT');
+}
+db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_expenses_request_key
+  ON expenses(request_key) WHERE request_key IS NOT NULL`);
 const memberCols = db.prepare('PRAGMA table_info(members)').all();
 if (!memberCols.some((c) => c.name === 'is_fund')) {
   db.exec('ALTER TABLE members ADD COLUMN is_fund INTEGER NOT NULL DEFAULT 0');

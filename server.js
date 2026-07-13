@@ -208,7 +208,10 @@ function getGroupData(groupId) {
     if (!splitsByExpense.has(split.expense_id)) splitsByExpense.set(split.expense_id, []);
     splitsByExpense.get(split.expense_id).push({ member_id: split.member_id, amount: split.amount });
   }
-  for (const expense of expenses) expense.splits = splitsByExpense.get(expense.id) || [];
+  for (const expense of expenses) {
+    delete expense.request_key;
+    expense.splits = splitsByExpense.get(expense.id) || [];
+  }
 
   const ledger = calculateLedger(members, expenses);
   const balances = Object.fromEntries(
@@ -642,6 +645,26 @@ function createExpense(req, res, withReceipt = false) {
   const parsed = validateExpenseInput(groupId, req.body);
   if (parsed.error) return res.status(400).json({ error: parsed.error });
   const expense = parsed.value;
+  const requestKey = req.body?.clientRequestId === undefined
+    ? null
+    : trimmedString(req.body.clientRequestId);
+  if (req.body?.clientRequestId !== undefined
+    && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestKey)) {
+    return res.status(400).json({ error: '新增請求識別碼格式不正確' });
+  }
+  if (requestKey) {
+    const existing = db.prepare(`SELECT id, group_id, version, receipt FROM expenses
+      WHERE request_key = ?`).get(requestKey);
+    if (existing) {
+      if (existing.group_id !== groupId) {
+        return res.status(409).json({ error: '新增請求識別碼已被使用' });
+      }
+      return res.json({
+        expenseId: existing.id, version: existing.version, receipt: existing.receipt,
+        duplicate: true,
+      });
+    }
+  }
 
   const expenseId = uid();
   let receiptFilename = null;
@@ -661,11 +684,12 @@ function createExpense(req, res, withReceipt = false) {
     db.transaction(() => {
       db.prepare(
         `INSERT INTO expenses (
-          id, group_id, payer_id, description, amount, category, expense_date, note, kind, receipt
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          id, group_id, payer_id, description, amount, category, expense_date, note, kind,
+          receipt, request_key
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         expenseId, groupId, expense.payerId, expense.description, expense.amount,
-        expense.category, expense.expenseDate, expense.note, expense.kind, receiptFilename
+        expense.category, expense.expenseDate, expense.note, expense.kind, receiptFilename, requestKey
       );
       const ins = db.prepare(
         'INSERT INTO expense_splits (expense_id, member_id, amount) VALUES (?, ?, ?)'
@@ -676,6 +700,16 @@ function createExpense(req, res, withReceipt = false) {
     })();
   } catch (error) {
     if (receiptFilename) unlinkReceipt(receiptFilename);
+    if (requestKey && String(error?.code || '').startsWith('SQLITE_CONSTRAINT')) {
+      const existing = db.prepare(`SELECT id, group_id, version, receipt FROM expenses
+        WHERE request_key = ?`).get(requestKey);
+      if (existing?.group_id === groupId) {
+        return res.json({
+          expenseId: existing.id, version: existing.version, receipt: existing.receipt,
+          duplicate: true,
+        });
+      }
+    }
     throw error;
   }
   return res.json({ expenseId, version: 1, receipt: receiptFilename });
@@ -956,6 +990,7 @@ app.get('/api/admin/overview', requireAdmin, (req, res) => {
     ORDER BY deleted_at DESC`).all(group.id);
   const splitStmt = db.prepare('SELECT member_id, amount FROM expense_splits WHERE expense_id = ?');
   for (const e of deleted) {
+    delete e.request_key;
     e.payer_name = nameOf.get(e.payer_id) || '?';
     e.split_names = splitStmt.all(e.id).map((s) => nameOf.get(s.member_id) || '?');
   }
