@@ -10,7 +10,11 @@ function fmt(n) {
   const s = Number.isInteger(abs)
     ? abs.toLocaleString()
     : abs.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  return (n < 0 ? '-$' : '$') + s;
+  const configured = overview?.group?.currency || 'NT$';
+  const currency = /^[A-Za-z$€£¥₩₹₫₱฿₽₺₪₴₦₲₡₭₮₵₸]{1,5}$/u.test(configured)
+    ? configured
+    : 'NT$';
+  return (n < 0 ? `-${currency}` : currency) + s;
 }
 
 // SQLite datetime('now') 是 UTC，轉當地時間顯示
@@ -81,6 +85,8 @@ async function loadPanel() {
   $('#panel').classList.remove('hidden');
   const nameInput = $('#ledger-name');
   if (document.activeElement !== nameInput) nameInput.value = overview.group.name;
+  const currencyInput = $('#ledger-currency');
+  if (document.activeElement !== currencyInput) currencyInput.value = overview.group.currency;
   renderMembers();
   renderCats();
   renderTrash();
@@ -249,9 +255,12 @@ $('#form-rename').addEventListener('submit', async (ev) => {
   try {
     await api(`/api/groups/${overview.group.id}`, {
       method: 'PATCH',
-      body: JSON.stringify({ name: $('#ledger-name').value }),
+      body: JSON.stringify({
+        name: $('#ledger-name').value,
+        currency: $('#ledger-currency').value,
+      }),
     });
-    toast('帳本名稱已更新');
+    toast('帳本設定已更新');
     loadPanel();
   } catch (e) { toast(e.message); }
 });

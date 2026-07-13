@@ -3,9 +3,16 @@
   "version": "1.0.0",
   "description": "個人記帳分帳 Web App",
   "main": "server.js",
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js"
+    "dev": "node --watch server.js",
+    "backup": "node scripts/backup.js",
+    "test": "node --test",
+    "check": "node --check server.js && node --check db.js && node --check public/app.js && node --check public/admin.js && node --check scripts/backup.js",
+    "verify": "npm run check && npm test"
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",

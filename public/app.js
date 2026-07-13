@@ -47,7 +47,9 @@ let state = {
   statsFrom: '',       // 統計起始日（'' = 不限）
   statsTo: '',         // 統計結束日（'' = 不限）
   editingId: null,     // 正在編輯的紀錄 id（null = 新增）
+  editingVersion: null,
   pollTimer: null,
+  refreshSeq: 0,
 };
 
 /* ===== 工具 ===== */
@@ -56,7 +58,11 @@ function fmt(n) {
   const s = Number.isInteger(abs)
     ? abs.toLocaleString()
     : abs.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  return (n < 0 ? '-$' : '$') + s;
+  const configured = state.data?.group?.currency || 'NT$';
+  const currency = /^[A-Za-z$€£¥₩₹₫₱฿₽₺₪₴₦₲₡₭₮₵₸]{1,5}$/u.test(configured)
+    ? configured
+    : 'NT$';
+  return (n < 0 ? `-${currency}` : currency) + s;
 }
 
 // 以本地時區取得今天日期（toISOString 是 UTC，凌晨會差一天）
@@ -90,7 +96,8 @@ const REDUCED_MOTION = matchMedia('(prefers-reduced-motion: reduce)').matches;
 function animateNumber(el, target, prefix = '') {
   const from = el._num ?? 0;
   el._num = target;
-  if (from === target || REDUCED_MOTION) { el.textContent = prefix + fmt(target); return; }
+  const render = (value) => (prefix && value > 0 ? prefix : '') + fmt(value);
+  if (from === target || REDUCED_MOTION) { el.textContent = render(target); return; }
   cancelAnimationFrame(el._raf);
   const start = performance.now();
   const dur = 400;
@@ -98,7 +105,7 @@ function animateNumber(el, target, prefix = '') {
     const t = Math.min(1, (now - start) / dur);
     const eased = 1 - Math.pow(1 - t, 3); // ease-out cubic
     const v = Math.round((from + (target - from) * eased) * 100) / 100;
-    el.textContent = prefix + fmt(v);
+    el.textContent = render(v);
     if (t < 1) el._raf = requestAnimationFrame(step);
   };
   el._raf = requestAnimationFrame(step);
@@ -120,7 +127,11 @@ async function api(url, options = {}) {
     ...options,
   });
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body.error || '發生錯誤，請稍後再試');
+  if (!res.ok) {
+    const error = new Error(body.error || '發生錯誤，請稍後再試');
+    error.status = res.status;
+    throw error;
+  }
   return body;
 }
 
@@ -144,9 +155,19 @@ function addDays(iso, n) {
   return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
 }
 
-async function refresh() {
+function canPoll() {
+  return !document.hidden && $('#modal-expense').classList.contains('hidden');
+}
+
+async function refresh({ poll = false } = {}) {
   if (!state.groupId) return;
-  state.data = await api(`/api/groups/${state.groupId}`);
+  if (poll && !canPoll()) return;
+
+  const seq = ++state.refreshSeq;
+  const data = await api(`/api/groups/${state.groupId}`);
+  if (seq !== state.refreshSeq || (poll && !canPoll())) return;
+
+  state.data = data;
   renderAll();
 }
 
@@ -238,23 +259,32 @@ function renderExpenses() {
   if (list.dataset.sig === html) return; // 內容沒變就不重建（避免輪詢時動畫重播）
   list.dataset.sig = html;
   list.innerHTML = html;
-
-  list.querySelectorAll('.expense-item').forEach((item) => {
-    const expense = state.data.expenses.find((e) => e.id === item.dataset.id);
-
-    item.querySelector('.expense-del').addEventListener('click', async (ev) => {
-      ev.stopPropagation();
-      if (!confirm(`確定刪除「${expense.description}」？`)) return;
-      try {
-        await api(`/api/groups/${state.groupId}/expenses/${expense.id}`, { method: 'DELETE' });
-        toast('已刪除');
-        refresh();
-      } catch (e) { toast(e.message); }
-    });
-
-    item.addEventListener('click', () => openExpenseModal(expense));
-  });
 }
+
+// 由點擊當下的最新 state 取紀錄，避免 HTML 未重建時沿用舊資料閉包。
+$('#expense-list').addEventListener('click', async (ev) => {
+  const item = ev.target.closest('.expense-item');
+  if (!item) return;
+  const expense = state.data?.expenses.find((e) => e.id === item.dataset.id);
+  if (!expense) return;
+
+  if (ev.target.closest('.expense-del')) {
+    if (!confirm(`確定刪除「${expense.description}」？`)) return;
+    try {
+      await api(`/api/groups/${state.groupId}/expenses/${expense.id}?version=${expense.version}`, {
+        method: 'DELETE',
+      });
+      toast('已刪除');
+      refresh();
+    } catch (e) {
+      if (e.status === 409) refresh().catch(() => {});
+      toast(e.message);
+    }
+    return;
+  }
+
+  openExpenseModal(expense);
+});
 
 /* ===== 結算 ===== */
 function renderBalances(members, balances) {
@@ -263,15 +293,15 @@ function renderBalances(members, balances) {
     // 公帳的負結餘代表「還握有大家的錢」，改以餘額呈現
     if (m.is_fund) {
       const held = Math.round(-bal * 100) / 100;
-      const cls = held > 0.01 ? 'positive' : held < -0.01 ? 'negative' : 'zero';
+      const cls = held > 0.005 ? 'positive' : held < -0.005 ? 'negative' : 'zero';
       return `
       <li>
         <span class="member-name-row">${escapeHtml(m.name)}</span>
-        <span class="balance-amount ${cls}">${held < -0.01 ? '透支' : '餘額'} ${fmt(Math.abs(held))}</span>
+        <span class="balance-amount ${cls}">${held < -0.005 ? '透支' : '餘額'} ${fmt(Math.abs(held))}</span>
       </li>`;
     }
-    const cls = bal > 0.01 ? 'positive' : bal < -0.01 ? 'negative' : 'zero';
-    const note = bal > 0.01 ? '應收' : bal < -0.01 ? '應付' : '結清';
+    const cls = bal > 0.005 ? 'positive' : bal < -0.005 ? 'negative' : 'zero';
+    const note = bal > 0.005 ? '應收' : bal < -0.005 ? '應付' : '結清';
     return `
       <li>
         <span class="member-name-row">${escapeHtml(m.name)}</span>
@@ -468,6 +498,16 @@ for (const id of ['stats-from', 'stats-to']) {
 let splitMode = 'equal';
 let expenseKind = 'expense';
 let transferCat = '轉帳'; // 編輯舊「還款」紀錄時保留原類別
+let expenseSubmitting = false;
+let expensePersisted = false;
+
+function setExpenseSubmitting(submitting) {
+  expenseSubmitting = submitting;
+  const button = $('#form-expense button[type="submit"]');
+  button.disabled = submitting;
+  button.textContent = submitting ? '儲存中…' : '儲存';
+  $('#modal-expense').setAttribute('aria-busy', String(submitting));
+}
 
 function setKind(kind) {
   expenseKind = kind;
@@ -531,8 +571,11 @@ function setSplitMode(mode) {
 }
 
 function openExpenseModal(expense = null) {
+  if (expenseSubmitting) return;
   const { members } = state.data;
+  expensePersisted = false;
   state.editingId = expense?.id || null;
+  state.editingVersion = expense?.version || null;
 
   $('#form-expense').reset();
   $('#exp-desc').value = expense?.description || '';
@@ -601,7 +644,8 @@ function openExpenseModal(expense = null) {
   setTimeout(() => $('#exp-desc').focus(), 50);
 }
 
-function closeExpenseModal() {
+function closeExpenseModal(force = false) {
+  if (expenseSubmitting && !force) return;
   const modal = $('#modal-expense');
   modal.classList.add('closing');
   modal._closeTimer = setTimeout(() => {
@@ -609,6 +653,7 @@ function closeExpenseModal() {
     modal.classList.remove('closing');
   }, 180);
   state.editingId = null;
+  state.editingVersion = null;
 }
 
 /* ===== 單據照片 ===== */
@@ -673,15 +718,24 @@ $('#btn-receipt-remove').addEventListener('click', () => {
 });
 
 $('#btn-delete-expense').addEventListener('click', async () => {
-  if (!state.editingId) return;
+  if (!state.editingId || expenseSubmitting) return;
   const exp = state.data.expenses.find((e) => e.id === state.editingId);
   if (!confirm(`確定刪除「${exp?.description ?? '這筆支出'}」？`)) return;
   try {
-    await api(`/api/groups/${state.groupId}/expenses/${state.editingId}`, { method: 'DELETE' });
+    await api(
+      `/api/groups/${state.groupId}/expenses/${state.editingId}?version=${exp.version}`,
+      { method: 'DELETE' }
+    );
     closeExpenseModal();
     toast('已刪除');
     refresh();
-  } catch (e) { toast(e.message); }
+  } catch (e) {
+    if (e.status === 409) {
+      closeExpenseModal();
+      refresh().catch(() => {});
+    }
+    toast(e.message);
+  }
 });
 
 // 均分並把餘數分給前面的人（避免 0.01 誤差）
@@ -758,7 +812,7 @@ $('#split-custom').addEventListener('click', () => setSplitMode('custom'));
 $('#split-none').addEventListener('click', () => setSplitMode('none'));
 
 $('#btn-add-expense').addEventListener('click', () => openExpenseModal());
-$('#btn-close-modal').addEventListener('click', closeExpenseModal);
+$('#btn-close-modal').addEventListener('click', () => closeExpenseModal());
 $('#modal-expense').addEventListener('click', (ev) => {
   if (ev.target === ev.currentTarget) closeExpenseModal();
 });
@@ -768,6 +822,7 @@ document.addEventListener('keydown', (ev) => {
 
 $('#form-expense').addEventListener('submit', async (ev) => {
   ev.preventDefault();
+  if (expenseSubmitting || expensePersisted) return;
   const amount = Number($('#exp-amount').value);
   let payload;
 
@@ -821,35 +876,73 @@ $('#form-expense').addEventListener('submit', async (ev) => {
     };
   }
 
+  const isEdit = !!state.editingId;
+  if (isEdit) payload.version = state.editingVersion;
+  let expenseId = state.editingId;
+  let persistedVersion = state.editingVersion;
+  const receiptUpdate = {
+    pending: receiptState.pending,
+    remove: receiptState.removed && !!receiptState.existing,
+  };
+  setExpenseSubmitting(true);
+
   try {
-    const isEdit = !!state.editingId;
-    let expenseId = state.editingId;
     if (isEdit) {
-      await api(`/api/groups/${state.groupId}/expenses/${expenseId}`, {
+      const saved = await api(`/api/groups/${state.groupId}/expenses/${expenseId}`, {
         method: 'PUT',
         body: JSON.stringify(payload),
       });
+      persistedVersion = saved.version;
     } else {
-      expenseId = (await api(`/api/groups/${state.groupId}/expenses`, {
+      const saved = await api(`/api/groups/${state.groupId}/expenses`, {
         method: 'POST',
         body: JSON.stringify(payload),
-      })).expenseId;
+      });
+      expenseId = saved.expenseId;
+      persistedVersion = saved.version;
     }
+    expensePersisted = true;
 
     // 單據：有新照片就上傳（會自動替換舊的），被移除就刪掉
-    if (receiptState.pending) {
-      await api(`/api/groups/${state.groupId}/expenses/${expenseId}/receipt`, {
-        method: 'POST',
-        body: JSON.stringify({ dataUrl: receiptState.pending }),
-      });
-    } else if (receiptState.removed && receiptState.existing) {
-      await api(`/api/groups/${state.groupId}/expenses/${expenseId}/receipt`, { method: 'DELETE' });
+    let receiptError = null;
+    try {
+      if (receiptUpdate.pending) {
+        await api(`/api/groups/${state.groupId}/expenses/${expenseId}/receipt`, {
+          method: 'POST',
+          body: JSON.stringify({
+            dataUrl: receiptUpdate.pending,
+            version: persistedVersion,
+          }),
+        });
+      } else if (receiptUpdate.remove) {
+        await api(
+          `/api/groups/${state.groupId}/expenses/${expenseId}/receipt?version=${persistedVersion}`,
+          { method: 'DELETE' }
+        );
+      }
+    } catch (e) {
+      receiptError = e;
     }
 
-    toast(isEdit ? '已更新' : '已新增');
-    closeExpenseModal();
-    refresh();
-  } catch (e) { toast(e.message); }
+    setExpenseSubmitting(false);
+    closeExpenseModal(true);
+    refresh().catch(() => {});
+    if (receiptError) {
+      const action = receiptUpdate.pending ? '上傳' : '移除';
+      toast(`帳目已${isEdit ? '更新' : '新增'}，但單據${action}失敗：${receiptError.message}`);
+    } else {
+      toast(isEdit ? '已更新' : '已新增');
+    }
+  } catch (e) {
+    if (e.status === 409) {
+      setExpenseSubmitting(false);
+      closeExpenseModal(true);
+      refresh().catch(() => {});
+    }
+    toast(e.message);
+  } finally {
+    setExpenseSubmitting(false);
+  }
 });
 
 /* ===== 初始化 ===== */
@@ -859,8 +952,12 @@ $('#form-expense').addEventListener('submit', async (ev) => {
     state.groupId = me.groupId;
     state.memberId = me.memberId;
     await refresh();
-    state.pollTimer = setInterval(() => refresh().catch(() => {}), 15000);
+    state.pollTimer = setInterval(() => refresh({ poll: true }).catch(() => {}), 15000);
   } catch (e) {
     toast(e.message);
   }
 })();
+
+document.addEventListener('visibilitychange', () => {
+  if (canPoll()) refresh({ poll: true }).catch(() => {});
+});

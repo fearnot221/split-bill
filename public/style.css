@@ -457,7 +457,8 @@ select {
 .member-del:hover { opacity: 1; color: var(--red); }
 
 .inline-form { display: flex; gap: 10px; margin-top: 16px; }
-.inline-form input { margin-top: 0; flex: 1; }
+.inline-form input { margin-top: 0; flex: 1; min-width: 0; }
+#ledger-currency { flex: 0 0 78px; font-family: var(--mono); }
 
 .hint { font-size: .78rem; color: var(--sub); margin: 4px 0 6px; }
 .hint-block {
