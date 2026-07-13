@@ -192,10 +192,10 @@
         </button>
       </div>
       <form id="form-expense">
-        <div class="seg kind-seg">
-          <button type="button" id="kind-expense" class="seg-btn active">支出</button>
-          <button type="button" id="kind-income" class="seg-btn">收入</button>
-          <button type="button" id="kind-transfer" class="seg-btn">轉帳</button>
+        <div class="seg kind-seg" aria-label="紀錄類型">
+          <button type="button" id="kind-expense" class="seg-btn active" aria-pressed="true">支出</button>
+          <button type="button" id="kind-income" class="seg-btn" aria-pressed="false">收入</button>
+          <button type="button" id="kind-transfer" class="seg-btn" aria-pressed="false">轉帳</button>
         </div>
         <div id="ai-review" class="ai-review hidden" role="status">
           <div id="ai-review-title" class="ai-review-title"></div>
@@ -222,10 +222,10 @@
         </label>
         <div class="split-header">
           <label>分攤方式</label>
-          <div class="seg">
-            <button type="button" id="split-equal" class="seg-btn active">均分</button>
-            <button type="button" id="split-custom" class="seg-btn">自訂金額</button>
-            <button type="button" id="split-none" class="seg-btn">不分攤</button>
+          <div class="seg" aria-label="分攤方式">
+            <button type="button" id="split-equal" class="seg-btn active" aria-pressed="true">均分</button>
+            <button type="button" id="split-custom" class="seg-btn" aria-pressed="false">自訂金額</button>
+            <button type="button" id="split-none" class="seg-btn" aria-pressed="false">不分攤</button>
           </div>
         </div>
         <div id="split-toolbar" class="split-toolbar">
@@ -256,6 +256,6 @@
 
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
-  <script src="app.js?v=36"></script>
+  <script src="app.js?v=37"></script>
 </body>
 </html>

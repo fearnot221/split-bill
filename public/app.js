@@ -1267,6 +1267,9 @@ function setKind(kind) {
   $('#kind-expense').classList.toggle('active', kind === 'expense');
   $('#kind-income').classList.toggle('active', kind === 'income');
   $('#kind-transfer').classList.toggle('active', isTr);
+  $('#kind-expense').setAttribute('aria-pressed', String(kind === 'expense'));
+  $('#kind-income').setAttribute('aria-pressed', String(kind === 'income'));
+  $('#kind-transfer').setAttribute('aria-pressed', String(isTr));
   $('#label-payer').firstChild.textContent =
     isTr ? '匯款人' : kind === 'income' ? '收款人' : '付款人';
   $('#modal-title').textContent = (aiDraftActive ? '確認' : state.editingId ? '編輯' : '新增') +
@@ -1315,6 +1318,9 @@ function setSplitMode(mode) {
   $('#split-equal').classList.toggle('active', mode === 'equal');
   $('#split-custom').classList.toggle('active', mode === 'custom');
   $('#split-none').classList.toggle('active', mode === 'none');
+  $('#split-equal').setAttribute('aria-pressed', String(mode === 'equal'));
+  $('#split-custom').setAttribute('aria-pressed', String(mode === 'custom'));
+  $('#split-none').setAttribute('aria-pressed', String(mode === 'none'));
   $('#split-members').classList.toggle('hidden', mode === 'none');
   $('#split-toolbar').classList.toggle('hidden', mode === 'none');
   $$('#split-members .split-amount-input').forEach((i) => i.classList.toggle('hidden', mode !== 'custom'));
@@ -1362,7 +1368,8 @@ function openExpenseModal(expense = null) {
   const splitMap = new Map((expense?.splits || []).map((s) => [s.member_id, s.amount]));
   $('#split-members').innerHTML = splitMembers.map((m) => `
     <li data-id="${m.id}">
-      <input type="checkbox" ${!expense || splitMap.has(m.id) ? 'checked' : ''}>
+      <input type="checkbox" aria-label="分攤給 ${escapeHtml(m.name)}"
+        ${!expense || splitMap.has(m.id) ? 'checked' : ''}>
       <span class="split-name">${escapeHtml(m.name)}</span>
       <span class="split-amount-label">—</span>
       <input type="number" class="split-amount-input hidden" min="0" step="0.01"
@@ -1372,6 +1379,14 @@ function openExpenseModal(expense = null) {
   $('#split-members').querySelectorAll('input').forEach((inp) => {
     inp.addEventListener('input', updateSplitPreview);
     inp.addEventListener('change', updateSplitPreview);
+  });
+  $$('#split-members > li').forEach((row) => {
+    row.addEventListener('click', (event) => {
+      if (event.target.closest('input, button')) return;
+      const checkbox = row.querySelector('input[type="checkbox"]');
+      checkbox.checked = !checkbox.checked;
+      updateSplitPreview();
+    });
   });
 
   // 編輯時判斷原本是不分攤、均分還是自訂

@@ -941,6 +941,7 @@ select {
   gap: 12px;
   padding: 10px 2px;
   border-bottom: 1px solid var(--rule);
+  cursor: pointer;
 }
 .split-list input[type="checkbox"] {
   width: 18px;
