@@ -33,6 +33,7 @@ test.before(async () => {
   process.env.APP_USERNAME = 'tester';
   process.env.APP_PASSWORD = 'access-secret';
   process.env.NODE_ENV = 'test';
+  delete process.env.OPENAI_API_KEY;
 
   const app = require('../server');
   server = await new Promise((resolve, reject) => {
@@ -117,6 +118,45 @@ test('API protects access, validates money, and rejects stale updates', async (t
     });
     assert.equal(weakPasswordChange.response.status, 400);
     assert.match(weakPasswordChange.body.error, /8/);
+  });
+
+  await t.test('creates an AI-ready draft with the local fallback', async () => {
+    const status = await request('/api/ai/status');
+    assert.equal(status.response.status, 200);
+    assert.equal(status.body.mode, 'local');
+    assert.equal(status.body.receiptRecognition, false);
+
+    const empty = await request(`/api/groups/${groupId}/ai/parse`, {
+      method: 'POST',
+      body: { text: '' },
+    });
+    assert.equal(empty.response.status, 400);
+
+    const parsed = await request(`/api/groups/${groupId}/ai/parse`, {
+      method: 'POST',
+      body: {
+        text: '昨天晚餐 NT$1,200，我跟小明均分，我付',
+        defaultMemberId: payerId,
+        localDate: '2026-07-14',
+      },
+    });
+    assert.equal(parsed.response.status, 200);
+    assert.equal(parsed.body.provider, 'local');
+    assert.equal(parsed.body.draft.ready, true);
+    assert.equal(parsed.body.draft.amount, 1200);
+    assert.equal(parsed.body.draft.category, '餐飲');
+    assert.equal(parsed.body.draft.expenseDate, '2026-07-13');
+    assert.deepEqual(new Set(parsed.body.draft.participantIds), new Set([payerId, memberId]));
+
+    const fakeReceipt = await request(`/api/groups/${groupId}/ai/parse`, {
+      method: 'POST',
+      body: {
+        text: '請分析',
+        receiptDataUrl: `data:image/jpeg;base64,${Buffer.from('not an image').toString('base64')}`,
+      },
+    });
+    assert.equal(fakeReceipt.response.status, 400);
+    assert.match(fakeReceipt.body.error, /格式不符/);
   });
 
   await t.test('rejects fractional cents, duplicate members, and invalid dates', async () => {

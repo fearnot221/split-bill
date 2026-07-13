@@ -246,6 +246,71 @@ select {
 }
 
 /* ===== 篩選列與分類 ===== */
+.smart-entry {
+  padding: 4px 0 20px;
+  margin-bottom: 18px;
+  border-bottom: 1.5px solid var(--rule-strong);
+}
+.smart-entry-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.smart-entry-head h2 { font-size: 1rem; font-weight: 700; }
+.smart-mode {
+  color: var(--sub);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 1px 7px;
+  font-size: .68rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.smart-input {
+  min-height: 92px;
+  margin: 0;
+  font-size: 1rem;
+  background: var(--card);
+  border-color: var(--rule-strong);
+}
+.smart-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+.smart-actions .btn { width: auto; }
+#btn-smart-analyze { margin-left: auto; }
+.smart-receipt {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  color: var(--sub);
+  font-size: .8rem;
+  font-weight: 600;
+}
+.smart-receipt .receipt-thumb { width: 46px; height: 46px; }
+.smart-receipt span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.smart-feedback {
+  min-height: 21px;
+  margin-top: 6px;
+  color: var(--sub);
+  font-size: .78rem;
+  font-weight: 600;
+}
+.smart-feedback.error { color: var(--red); }
+.smart-privacy { color: var(--sub); font-size: .68rem; opacity: .78; }
+.smart-entry[aria-busy="true"] { cursor: wait; }
+
 .filter-bar { margin-bottom: 4px; }
 .filter-bar input[type="search"] { margin-top: 0; }
 .filter-bar .chip-row { margin: 8px 0 0; }
@@ -751,6 +816,16 @@ select {
 
 .kind-seg { margin-bottom: 18px; }
 .kind-seg .seg-btn { flex: 1; padding: 7px 0; }
+
+.ai-review {
+  padding: 9px 12px;
+  margin-bottom: 14px;
+  border-left: 3px solid var(--green);
+  background: var(--fill);
+  font-size: .78rem;
+}
+.ai-review-title { font-weight: 700; }
+.ai-review ul { margin: 3px 0 0 17px; color: var(--sub); }
 
 .split-header {
   display: flex;

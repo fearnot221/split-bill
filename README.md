@@ -17,6 +17,7 @@
 - **快速完成結算**：結算方案可直接帶入匯款人、收款人與金額記錄轉帳
 - **統計圖表**：以天為單位的日期區間（含近 7 天／近 30 天／本月快選），顯示每日收支、淨額、分類佔比與成員統計
 - **搜尋與篩選**：關鍵字搜尋＋支出／收入／轉帳類型＋分類快篩，即時顯示結果筆數
+- **一句記帳**：輸入自然語言或附上單據，自動整理金額、日期、付款人、分攤成員與類別，確認修改後才寫入帳本
 - **單據照片**：記帳時可附上單據，前端自動壓縮後上傳（存於 `uploads/`），列表以迴紋針標示
 - **金額顏色**：支出紅、還款綠，一眼分辨
 - **回收桶**：刪除的支出可從管理面板復原（清空回收桶會連單據檔案一併刪除）
@@ -61,6 +62,26 @@ APP_USERNAME=ledger APP_PASSWORD='請使用足夠長的密碼' npm start
 `APP_USERNAME` 預設為 `ledger`，`APP_PASSWORD` 至少需要 8 碼。管理面板密碼仍獨立存在，只負責成員、帳本設定與回收桶等管理操作。
 
 `NODE_ENV=production` 時若未設定 `APP_PASSWORD`，服務會拒絕啟動。若已由 Cloudflare Access、VPN 或可信任的反向代理完成驗證，需明確設定 `ALLOW_PUBLIC_ACCESS=1` 才能略過內建密碼。
+
+### AI 帳目分析
+
+在伺服器設定 OpenAI API 金鑰後，「一句記帳」會透過 Responses API 分析文字與單據影像：
+
+```bash
+OPENAI_API_KEY='sk-...' npm start
+```
+
+預設模型為 `gpt-5.6`，可以依部署需求調整：
+
+```bash
+OPENAI_MODEL='gpt-5.6' OPENAI_TIMEOUT_MS=30000 AI_REQUESTS_PER_HOUR=30 npm start
+```
+
+- `OPENAI_MODEL`：帳目辨識模型，預設 `gpt-5.6`
+- `OPENAI_TIMEOUT_MS`：單次 AI 請求逾時，預設 30 秒
+- `AI_REQUESTS_PER_HOUR`：每個來源 IP 每小時上限，預設 30 次
+
+沒有設定金鑰時，應用程式會用本地基本規則解析文字，單據仍可附加至帳目，但不會進行影像辨識。AI 模式下，當次文字與單據會傳送至 OpenAI，請求設定 `store: false`；API 金鑰只保留在伺服器端，不會傳到瀏覽器。實作依據 [Responses API](https://developers.openai.com/api/docs/guides/migrate-to-responses)、[Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs) 與 [Images and vision](https://developers.openai.com/api/docs/guides/images-vision) 官方文件。
 
 ## 備份
 
@@ -138,6 +159,8 @@ npm run verify
 - `POST /api/groups/:id/categories` — 新增類別
 - `DELETE /api/groups/:id/categories/:categoryId` — 刪除未使用類別（管理員）
 - `POST /api/groups/:id/expenses` — 新增支出
+- `GET /api/ai/status` — 取得 AI／本地解析模式
+- `POST /api/groups/:id/ai/parse` — 將文字與可選單據轉為待確認帳目草稿
 - `PUT /api/groups/:id/expenses/:expenseId` — 依版本編輯支出
 - `DELETE /api/groups/:id/expenses/:expenseId?version=:version` — 依版本軟刪除支出
 - `POST /api/groups/:id/expenses/:expenseId/receipt` — 依 body `version` 上傳或替換單據

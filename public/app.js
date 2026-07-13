@@ -51,7 +51,13 @@ let state = {
   editingVersion: null,
   pollTimer: null,
   refreshSeq: 0,
+  aiStatus: null,
 };
+
+let smartReceiptDataUrl = null;
+let smartReceiptName = '';
+let smartAnalyzing = false;
+let aiDraftActive = false;
 
 /* ===== 工具 ===== */
 function fmt(n) {
@@ -620,6 +626,182 @@ $('#btn-clear-filters').addEventListener('click', () => {
   $('#filter-text').focus();
 });
 
+/* ===== 一句記帳 ===== */
+function setSmartFeedback(message, error = false) {
+  const feedback = $('#smart-feedback');
+  feedback.textContent = message;
+  feedback.classList.toggle('error', error);
+}
+
+function setSmartAnalyzing(analyzing) {
+  smartAnalyzing = analyzing;
+  $('#smart-entry-title').closest('.smart-entry').setAttribute('aria-busy', String(analyzing));
+  $('#smart-input').disabled = analyzing;
+  $('#btn-smart-receipt').disabled = analyzing;
+  $('#btn-smart-receipt-remove').disabled = analyzing;
+  $('#btn-smart-analyze').disabled = analyzing;
+  const label = $('#btn-smart-analyze span');
+  label.textContent = analyzing ? '分析中…' : '分析帳目';
+  if (analyzing) setSmartFeedback('正在整理金額、成員與分攤方式…');
+}
+
+function renderSmartReceipt() {
+  const row = $('#smart-receipt');
+  row.classList.toggle('hidden', !smartReceiptDataUrl);
+  if (smartReceiptDataUrl) {
+    $('#smart-receipt-thumb').src = smartReceiptDataUrl;
+    $('#smart-receipt-name').textContent = smartReceiptName || '單據圖片';
+  } else {
+    $('#smart-receipt-thumb').removeAttribute('src');
+    $('#smart-receipt-name').textContent = '';
+  }
+}
+
+async function setSmartReceiptFile(file) {
+  if (!file) return;
+  if (!file.type.startsWith('image/')) throw new Error('請選擇圖片檔案');
+  if (file.size > 25 * 1024 * 1024) throw new Error('圖片過大（原始檔上限 25MB）');
+  smartReceiptDataUrl = await compressImage(file);
+  smartReceiptName = file.name || '貼上的單據';
+  renderSmartReceipt();
+  setSmartFeedback(state.aiStatus?.receiptRecognition
+    ? '單據已附上，可以開始分析'
+    : '單據已附上；目前只會保留圖片，尚未啟用影像辨識');
+}
+
+async function loadAiStatus() {
+  const status = await api('/api/ai/status');
+  state.aiStatus = status;
+  $('#smart-mode').textContent = status.mode === 'openai' ? 'AI 單據辨識' : '基本文字解析';
+  $('#btn-smart-analyze').disabled = false;
+  if (status.mode !== 'openai') {
+    setSmartFeedback('尚未設定 AI 金鑰，仍可使用基本文字解析');
+  }
+}
+
+function clearSmartEntry() {
+  $('#smart-input').value = '';
+  $('#smart-receipt-file').value = '';
+  smartReceiptDataUrl = null;
+  smartReceiptName = '';
+  aiDraftActive = false;
+  renderSmartReceipt();
+  setSmartFeedback('帳目已儲存');
+}
+
+function showAiReview(result) {
+  const { draft } = result;
+  const title = result.provider === 'openai'
+    ? `AI 草稿 · 信心 ${Math.round(draft.confidence * 100)}%`
+    : '基本文字草稿';
+  $('#ai-review-title').textContent = `${title}，儲存前請確認`;
+  const warnings = [...(result.notices || []), ...(draft.warnings || [])];
+  const list = $('#ai-review-warnings');
+  list.replaceChildren(...warnings.map((warning) => {
+    const item = document.createElement('li');
+    item.textContent = warning;
+    return item;
+  }));
+  list.classList.toggle('hidden', warnings.length === 0);
+  $('#ai-review').classList.remove('hidden');
+}
+
+function applyAiDraft(result) {
+  const { draft } = result;
+  openExpenseModal();
+  aiDraftActive = true;
+
+  $('#exp-desc').value = draft.description || '';
+  $('#exp-amount').value = draft.amount ?? '';
+  $('#exp-date').value = draft.expenseDate || todayLocal();
+  $('#exp-note').value = draft.note || '';
+  if (draft.payerId
+    && [...$('#exp-payer').options].some((option) => option.value === draft.payerId)) {
+    $('#exp-payer').value = draft.payerId;
+  }
+
+  if (draft.kind === 'transfer') {
+    setKind('transfer');
+    renderTransferTargets(draft.transferToId);
+  } else {
+    renderModalCats(draft.category);
+    setKind(draft.kind === 'income' ? 'income' : 'expense');
+    const participants = new Set(draft.participantIds || []);
+    const custom = new Map((draft.customSplits || []).map((split) => [split.memberId, split.amount]));
+    $$('#split-members > li').forEach((row) => {
+      row.querySelector('input[type="checkbox"]').checked = participants.has(row.dataset.id);
+      row.querySelector('.split-amount-input').value = custom.get(row.dataset.id) ?? '';
+    });
+    setSplitMode(draft.splitMode || 'equal');
+    updateSplitPreview();
+  }
+
+  if (smartReceiptDataUrl) {
+    receiptState.pending = smartReceiptDataUrl;
+    receiptState.removed = false;
+    renderReceiptUI();
+  }
+  showAiReview(result);
+  setSmartFeedback('草稿已建立，請確認後儲存');
+}
+
+async function analyzeSmartEntry() {
+  if (smartAnalyzing) return;
+  const text = $('#smart-input').value.trim();
+  if (!text && !smartReceiptDataUrl) {
+    setSmartFeedback('請輸入記帳內容或附上單據', true);
+    $('#smart-input').focus();
+    return;
+  }
+  setSmartAnalyzing(true);
+  try {
+    const result = await api(`/api/groups/${state.groupId}/ai/parse`, {
+      method: 'POST',
+      body: JSON.stringify({
+        text,
+        receiptDataUrl: smartReceiptDataUrl,
+        defaultMemberId: state.memberId,
+        localDate: todayLocal(),
+      }),
+    });
+    if (!result.draft?.isLedgerEntry) {
+      const message = result.draft?.warnings?.[0] || '無法從這段內容建立帳目';
+      setSmartFeedback(message, true);
+      return;
+    }
+    applyAiDraft(result);
+  } catch (error) {
+    setSmartFeedback(error.message, true);
+  } finally {
+    setSmartAnalyzing(false);
+  }
+}
+
+$('#btn-smart-receipt').addEventListener('click', () => $('#smart-receipt-file').click());
+$('#smart-receipt-file').addEventListener('change', async (ev) => {
+  try { await setSmartReceiptFile(ev.target.files[0]); } catch (error) {
+    setSmartFeedback(error.message, true);
+  }
+  ev.target.value = '';
+});
+$('#btn-smart-receipt-remove').addEventListener('click', () => {
+  smartReceiptDataUrl = null;
+  smartReceiptName = '';
+  renderSmartReceipt();
+  setSmartFeedback('');
+});
+$('#btn-smart-analyze').addEventListener('click', analyzeSmartEntry);
+$('#smart-input').addEventListener('keydown', (ev) => {
+  if ((ev.metaKey || ev.ctrlKey) && ev.key === 'Enter') {
+    ev.preventDefault();
+    analyzeSmartEntry();
+  }
+});
+$('#smart-input').addEventListener('paste', (ev) => {
+  const image = [...(ev.clipboardData?.files || [])].find((file) => file.type.startsWith('image/'));
+  if (image) setSmartReceiptFile(image).catch((error) => setSmartFeedback(error.message, true));
+});
+
 /* ===== 統計操作 ===== */
 function setStatsRange(from, to) {
   state.statsFrom = from;
@@ -762,6 +944,9 @@ function setSplitMode(mode) {
 
 function openExpenseModal(expense = null) {
   if (expenseSubmitting) return;
+  aiDraftActive = false;
+  $('#ai-review').classList.add('hidden');
+  $('#ai-review-warnings').replaceChildren();
   modalReturnFocus = document.activeElement;
   const { members } = state.data;
   expensePersisted = false;
@@ -1153,6 +1338,7 @@ $('#form-expense').addEventListener('submit', async (ev) => {
       persistedVersion = saved.version;
     }
     expensePersisted = true;
+    const completedAiDraft = aiDraftActive;
 
     // 單據：有新照片就上傳（會自動替換舊的），被移除就刪掉
     let receiptError = null;
@@ -1177,6 +1363,7 @@ $('#form-expense').addEventListener('submit', async (ev) => {
 
     setExpenseSubmitting(false);
     closeExpenseModal(true);
+    if (completedAiDraft) clearSmartEntry();
     refresh().catch(() => {});
     if (receiptError) {
       const action = receiptUpdate.pending ? '上傳' : '移除';
@@ -1209,6 +1396,10 @@ async function initialize() {
       state.memberId = me.memberId;
     }
     await refresh();
+    loadAiStatus().catch(() => {
+      $('#smart-mode').textContent = '狀態未知';
+      $('#btn-smart-analyze').disabled = false;
+    });
     if (!state.pollTimer) {
       state.pollTimer = setInterval(() => refresh({ poll: true }).catch(() => {}), 15000);
     }

@@ -40,6 +40,35 @@
     <main class="container">
       <!-- 支出列表 -->
       <section id="tab-expenses" class="tab-panel">
+        <section class="smart-entry" aria-labelledby="smart-entry-title">
+          <div class="smart-entry-head">
+            <h2 id="smart-entry-title">一句記帳</h2>
+            <span id="smart-mode" class="smart-mode">準備中</span>
+          </div>
+          <label class="visually-hidden" for="smart-input">記帳內容</label>
+          <textarea id="smart-input" class="smart-input" rows="3" maxlength="2000"
+            placeholder="例如：昨天晚餐 1,280，我付的，我跟小明、小美均分"></textarea>
+          <div id="smart-receipt" class="smart-receipt hidden">
+            <img id="smart-receipt-thumb" class="receipt-thumb" alt="待分析單據縮圖">
+            <span id="smart-receipt-name"></span>
+            <button type="button" id="btn-smart-receipt-remove" class="icon-btn" aria-label="移除單據">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+            </button>
+          </div>
+          <div class="smart-actions">
+            <input type="file" id="smart-receipt-file" accept="image/*" class="hidden">
+            <button type="button" id="btn-smart-receipt" class="btn btn-secondary btn-sm">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h3l2-3h6l2 3h3a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2Z"/><circle cx="12" cy="13" r="4"/></svg>
+              <span>附上單據</span>
+            </button>
+            <button type="button" id="btn-smart-analyze" class="btn btn-primary btn-sm" disabled>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3-1.4 3.6L7 8l3.6 1.4L12 13l1.4-3.6L17 8l-3.6-1.4Z"/><path d="m19 14-.8 2.2L16 17l2.2.8L19 20l.8-2.2L22 17l-2.2-.8Z"/><path d="m5 14-.8 2.2L2 17l2.2.8L5 20l.8-2.2L8 17l-2.2-.8Z"/></svg>
+              <span>分析帳目</span>
+            </button>
+          </div>
+          <p id="smart-feedback" class="smart-feedback" role="status" aria-live="polite"></p>
+          <p class="smart-privacy">啟用 AI 時，這次輸入的文字與單據會傳送至 OpenAI 進行分析。</p>
+        </section>
         <div class="filter-bar">
           <label class="visually-hidden" for="filter-text">搜尋紀錄</label>
           <input type="search" id="filter-text" placeholder="搜尋說明、付款人…" autocomplete="off">
@@ -157,6 +186,10 @@
           <button type="button" id="kind-income" class="seg-btn">收入</button>
           <button type="button" id="kind-transfer" class="seg-btn">轉帳</button>
         </div>
+        <div id="ai-review" class="ai-review hidden" role="status">
+          <div id="ai-review-title" class="ai-review-title"></div>
+          <ul id="ai-review-warnings"></ul>
+        </div>
         <label>項目說明
           <input type="text" id="exp-desc" placeholder="例如：晚餐、車票" maxlength="50" required>
         </label>
@@ -210,6 +243,6 @@
 
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
-  <script src="app.js?v=18"></script>
+  <script src="app.js?v=19"></script>
 </body>
 </html>

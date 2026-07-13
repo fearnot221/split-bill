@@ -2,18 +2,32 @@ const express = require('express');
 const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
+const OpenAI = require('openai');
 const {
   calculateLedger,
   calculateSettlements,
   centsToMoney,
   moneyToCents,
 } = require('./lib/ledger');
+const {
+  analyzeWithOpenAI,
+  localParse,
+  normalizeDraft,
+} = require('./lib/ai-ledger');
 
 const app = express();
+const positiveIntegerEnv = (value, fallback) => {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+};
 const PORT = process.env.PORT || 3000;
 const APP_USERNAME = process.env.APP_USERNAME || 'ledger';
 const APP_PASSWORD = process.env.APP_PASSWORD || '';
 const ALLOW_PUBLIC_ACCESS = process.env.ALLOW_PUBLIC_ACCESS === '1';
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
+const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-5.6';
+const OPENAI_TIMEOUT_MS = positiveIntegerEnv(process.env.OPENAI_TIMEOUT_MS, 30_000);
+const AI_REQUESTS_PER_HOUR = positiveIntegerEnv(process.env.AI_REQUESTS_PER_HOUR, 30);
 
 if (APP_USERNAME.includes(':') || /[\r\n]/.test(APP_USERNAME)) {
   throw new Error('APP_USERNAME cannot contain a colon or line break');
@@ -28,6 +42,9 @@ if (process.env.NODE_ENV === 'production' && !APP_PASSWORD && !ALLOW_PUBLIC_ACCE
 }
 
 const db = require('./db');
+const openai = OPENAI_API_KEY
+  ? new OpenAI({ apiKey: OPENAI_API_KEY, timeout: OPENAI_TIMEOUT_MS, maxRetries: 1 })
+  : null;
 
 if (process.env.TRUST_PROXY === '1') app.set('trust proxy', 1);
 app.disable('x-powered-by');
@@ -88,8 +105,12 @@ app.use((req, res, next) => {
 
 const regularJson = express.json({ limit: '100kb' });
 const receiptJson = express.json({ limit: '15mb' });
+const aiJson = express.json({ limit: '15mb' });
 app.use('/api/groups/:id/expenses/:expenseId/receipt', (req, res, next) => {
   return req.method === 'POST' ? receiptJson(req, res, next) : next();
+});
+app.use('/api/groups/:id/ai/parse', (req, res, next) => {
+  return req.method === 'POST' ? aiJson(req, res, next) : next();
 });
 app.use(regularJson);
 app.use(express.static(path.join(__dirname, 'public')));
@@ -311,6 +332,112 @@ function validateExpenseInput(groupId, body) {
     },
   };
 }
+
+function todayInTaipei() {
+  const parts = new Intl.DateTimeFormat('en', {
+    timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(new Date());
+  const part = (type) => parts.find((item) => item.type === type)?.value;
+  return `${part('year')}-${part('month')}-${part('day')}`;
+}
+
+function getAiContext(groupId, preferredMemberId) {
+  const group = db.prepare('SELECT id FROM groups WHERE id = ?').get(groupId);
+  if (!group) return null;
+  const members = db.prepare(
+    'SELECT id, name, is_fund FROM members WHERE group_id = ? ORDER BY created_at'
+  ).all(groupId);
+  const categories = db.prepare(
+    'SELECT name FROM categories WHERE group_id = ? ORDER BY sort, rowid'
+  ).all(groupId);
+  const preferred = members.find((member) => member.id === preferredMemberId && !member.is_fund);
+  const defaultMember = preferred || members.find((member) => !member.is_fund) || members[0];
+  return { members, categories, defaultMemberId: defaultMember?.id || null };
+}
+
+const aiUsage = new Map();
+function consumeAiQuota(ip) {
+  const now = Date.now();
+  let record = aiUsage.get(ip);
+  if (!record || now >= record.resetAt) {
+    record = { count: 0, resetAt: now + 60 * 60 * 1000 };
+    aiUsage.set(ip, record);
+  }
+  if (record.count >= AI_REQUESTS_PER_HOUR) {
+    return Math.max(1, Math.ceil((record.resetAt - now) / 1000));
+  }
+  record.count += 1;
+  if (aiUsage.size > 1000) aiUsage.delete(aiUsage.keys().next().value);
+  return 0;
+}
+
+app.get('/api/ai/status', (req, res) => {
+  res.json({
+    mode: openai ? 'openai' : 'local',
+    model: openai ? OPENAI_MODEL : null,
+    receiptRecognition: !!openai,
+  });
+});
+
+app.post('/api/groups/:id/ai/parse', async (req, res) => {
+  const body = req.body;
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return res.status(400).json({ error: '請提供正確的智慧記帳內容' });
+  }
+  const text = trimmedString(body.text);
+  if (text.length > 2000) return res.status(400).json({ error: '記帳文字最多 2000 字' });
+  const receiptDataUrl = typeof body.receiptDataUrl === 'string' ? body.receiptDataUrl : '';
+  if (!text && !receiptDataUrl) return res.status(400).json({ error: '請輸入記帳內容或附上單據' });
+  if (receiptDataUrl) {
+    const receipt = decodeReceipt(receiptDataUrl);
+    if (receipt.error) return res.status(400).json({ error: receipt.error });
+  }
+
+  const context = getAiContext(req.params.id, body.defaultMemberId);
+  if (!context) return res.status(404).json({ error: '找不到帳本' });
+  const today = isValidDate(body.localDate) ? body.localDate : todayInTaipei();
+
+  if (!openai) {
+    const raw = localParse(text, { ...context, today, hasReceipt: !!receiptDataUrl });
+    const draft = normalizeDraft(raw, { ...context, today, sourceText: text });
+    return res.json({
+      provider: 'local',
+      model: null,
+      draft,
+      notices: ['伺服器尚未設定 OPENAI_API_KEY，目前使用基本文字規則分析'],
+    });
+  }
+
+  const retryAfter = consumeAiQuota(req.ip);
+  if (retryAfter) {
+    res.setHeader('Retry-After', String(retryAfter));
+    return res.status(429).json({ error: '智慧分析次數已達上限，請稍後再試' });
+  }
+
+  try {
+    const draft = await analyzeWithOpenAI({
+      client: openai,
+      model: OPENAI_MODEL,
+      text,
+      receiptDataUrl: receiptDataUrl || null,
+      context,
+      today,
+      safetyIdentifier: `ledger_${sha256(req.params.id).slice(0, 32)}`,
+    });
+    return res.json({ provider: 'openai', model: OPENAI_MODEL, draft, notices: [] });
+  } catch (error) {
+    const status = Number(error?.status);
+    console.error('AI 帳目分析失敗:', status || '', error?.message || error);
+    if (status === 429) return res.status(429).json({ error: 'AI 服務目前忙碌，請稍後再試' });
+    if (status === 401 || status === 403) {
+      return res.status(503).json({ error: 'AI 服務金鑰設定無效，請聯絡管理者' });
+    }
+    if (!status && /^(AI 沒有|AI 回傳|無法分析)/.test(error?.message || '')) {
+      return res.status(422).json({ error: error.message });
+    }
+    return res.status(502).json({ error: 'AI 帳目分析失敗，請稍後再試' });
+  }
+});
 
 // 個人模式：取得（或自動建立）預設帳本
 app.get('/api/me', (req, res) => {
