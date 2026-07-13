@@ -149,27 +149,32 @@ test('builds a private multimodal Responses API request', () => {
 });
 
 test('parses and normalizes a structured OpenAI response', async () => {
+  const abortController = new AbortController();
+  let receivedOptions;
   const client = {
     responses: {
-      create: async () => ({
-        output_text: JSON.stringify({
-          isLedgerEntry: true,
-          kind: 'expense',
-          description: '車票',
-          amount: 88,
-          category: '交通',
-          expenseDate: '2026-07-14',
-          payerName: '我',
-          participantNames: ['我', '小明'],
-          splitMode: 'equal',
-          customSplits: [],
-          transferToName: null,
-          note: null,
-          confidence: 0.96,
-          warnings: [],
-        }),
-        output: [],
-      }),
+      create: async (_request, options) => {
+        receivedOptions = options;
+        return {
+          output_text: JSON.stringify({
+            isLedgerEntry: true,
+            kind: 'expense',
+            description: '車票',
+            amount: 88,
+            category: '交通',
+            expenseDate: '2026-07-14',
+            payerName: '我',
+            participantNames: ['我', '小明'],
+            splitMode: 'equal',
+            customSplits: [],
+            transferToName: null,
+            note: null,
+            confidence: 0.96,
+            warnings: [],
+          }),
+          output: [],
+        };
+      },
     },
   };
   const draft = await analyzeWithOpenAI({
@@ -180,8 +185,10 @@ test('parses and normalizes a structured OpenAI response', async () => {
     context,
     today: '2026-07-14',
     safetyIdentifier: 'ledger_test',
+    signal: abortController.signal,
   });
   assert.equal(draft.ready, true);
   assert.equal(draft.category, '交通');
   assert.deepEqual(draft.participantIds, ['me', 'ming']);
+  assert.equal(receivedOptions.signal, abortController.signal);
 });

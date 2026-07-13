@@ -415,6 +415,8 @@ app.post('/api/groups/:id/ai/parse', async (req, res) => {
   }
 
   try {
+    const abortController = new AbortController();
+    req.once('aborted', () => abortController.abort());
     const draft = await analyzeWithOpenAI({
       client: openai,
       model: OPENAI_MODEL,
@@ -423,9 +425,11 @@ app.post('/api/groups/:id/ai/parse', async (req, res) => {
       context,
       today,
       safetyIdentifier: `ledger_${sha256(req.params.id).slice(0, 32)}`,
+      signal: abortController.signal,
     });
     return res.json({ provider: 'openai', model: OPENAI_MODEL, draft, notices: [] });
   } catch (error) {
+    if (req.aborted) return;
     const status = Number(error?.status);
     console.error('AI 帳目分析失敗:', status || '', error?.message || error);
     if (status === 429) return res.status(429).json({ error: 'AI 服務目前忙碌，請稍後再試' });

@@ -283,6 +283,11 @@ select {
 }
 .smart-actions .btn { width: auto; }
 #btn-smart-analyze { margin-left: auto; }
+#btn-smart-analyze.analyzing {
+  color: var(--red);
+  background: none;
+  border-color: var(--red);
+}
 .smart-voice {
   width: 40px;
   height: 40px;

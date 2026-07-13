@@ -62,6 +62,7 @@ let smartPersistTimer = null;
 let smartDraftRestored = false;
 let smartDbPromise = null;
 let smartSpeechRecognition = null;
+let smartAnalyzeController = null;
 
 /* ===== 工具 ===== */
 function fmt(n) {
@@ -140,6 +141,12 @@ async function api(url, options = {}) {
       ...options,
     });
   } catch (cause) {
+    if (cause?.name === 'AbortError') {
+      const error = new Error('已取消分析');
+      error.cancelled = true;
+      error.status = 0;
+      throw error;
+    }
     const message = navigator.onLine === false
       ? '目前處於離線狀態，請確認網路後重試'
       : '無法連線到帳本，請稍後重試';
@@ -649,9 +656,10 @@ function setSmartAnalyzing(analyzing) {
   $('#btn-smart-receipt').disabled = analyzing;
   $('#btn-smart-voice').disabled = analyzing;
   $('#btn-smart-receipt-remove').disabled = analyzing;
-  $('#btn-smart-analyze').disabled = analyzing;
+  $('#btn-smart-analyze').disabled = false;
   const label = $('#btn-smart-analyze span');
-  label.textContent = analyzing ? '分析中…' : '分析帳目';
+  label.textContent = analyzing ? '取消分析' : '分析帳目';
+  $('#btn-smart-analyze').classList.toggle('analyzing', analyzing);
   if (analyzing) setSmartFeedback('正在整理金額、成員與分攤方式…');
 }
 
@@ -932,17 +940,22 @@ function applyAiDraft(result) {
 }
 
 async function analyzeSmartEntry() {
-  if (smartAnalyzing) return;
+  if (smartAnalyzing) {
+    smartAnalyzeController?.abort();
+    return;
+  }
   const text = $('#smart-input').value.trim();
   if (!text && !smartReceiptDataUrl) {
     setSmartFeedback('請輸入記帳內容或附上單據', true);
     $('#smart-input').focus();
     return;
   }
+  smartAnalyzeController = new AbortController();
   setSmartAnalyzing(true);
   try {
     const result = await api(`/api/groups/${state.groupId}/ai/parse`, {
       method: 'POST',
+      signal: smartAnalyzeController.signal,
       body: JSON.stringify({
         text,
         receiptDataUrl: smartReceiptDataUrl,
@@ -957,8 +970,9 @@ async function analyzeSmartEntry() {
     }
     applyAiDraft(result);
   } catch (error) {
-    setSmartFeedback(error.message, true);
+    setSmartFeedback(error.message, !error.cancelled);
   } finally {
+    smartAnalyzeController = null;
     setSmartAnalyzing(false);
   }
 }
@@ -1418,6 +1432,11 @@ $('#modal-expense').addEventListener('click', (ev) => {
 document.addEventListener('keydown', (ev) => {
   const modal = $('#modal-expense');
   if (modal.classList.contains('hidden') || modal.classList.contains('closing')) return;
+  if ((ev.metaKey || ev.ctrlKey) && ev.key === 'Enter' && !expenseSubmitting) {
+    ev.preventDefault();
+    $('#form-expense').requestSubmit();
+    return;
+  }
   if (ev.key === 'Escape') {
     ev.preventDefault();
     closeExpenseModal();
