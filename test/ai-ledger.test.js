@@ -137,6 +137,23 @@ test('local parser handles everyone, income, and no-split phrases', () => {
   assert.deepEqual(income.participantIds, ['me']);
 });
 
+test('local parser preserves description words and extracts a trailing note', () => {
+  const text = '連續記帳測試 321，我付不分攤，備註：每月核對';
+  const draft = normalizeDraft(
+    localParse(text, { ...context, today: '2026-07-14', hasReceipt: false }),
+    { ...context, today: '2026-07-14', sourceText: text }
+  );
+  assert.equal(draft.description, '連續記帳測試');
+  assert.equal(draft.note, '每月核對');
+
+  const commandText = '請幫我記帳：昨天晚餐 500，我付不分攤';
+  const command = normalizeDraft(
+    localParse(commandText, { ...context, today: '2026-07-14', hasReceipt: false }),
+    { ...context, today: '2026-07-14', sourceText: commandText }
+  );
+  assert.equal(command.description, '晚餐');
+});
+
 test('local parser handles common payer, transfer, date, category, and total phrasing', () => {
   const richContext = {
     ...context,
