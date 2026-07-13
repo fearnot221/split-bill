@@ -143,6 +143,15 @@ test('local parser keeps dates and times out of the amount', () => {
     assert.equal(draft.expenseDate, date, text);
     assert.equal(draft.description, description, text);
   }
+
+  for (const invalidPrecision of ['晚餐 500.123 我付', '晚餐 NT$500.123 我付', '晚餐 500.123元 我付']) {
+    const draft = normalizeDraft(
+      localParse(invalidPrecision, { ...context, today: '2026-07-14', hasReceipt: false }),
+      { ...context, today: '2026-07-14', sourceText: invalidPrecision }
+    );
+    assert.equal(draft.amount, null, invalidPrecision);
+    assert.match(draft.warnings.join(' '), /尚未辨識金額/, invalidPrecision);
+  }
 });
 
 test('local parser handles everyone, income, and no-split phrases', () => {
