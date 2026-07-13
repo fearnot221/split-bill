@@ -60,6 +60,19 @@ test('local parser preserves valid custom splits', () => {
     { memberId: 'me', memberName: '我', amount: 200 },
     { memberId: 'ming', memberName: '小明', amount: 100 },
   ]);
+
+  const chineseText = '晚餐我六百、小明三百，總額九百';
+  const chineseDraft = normalizeDraft(
+    localParse(chineseText, { ...context, today: '2026-07-14', hasReceipt: false }),
+    { ...context, today: '2026-07-14', sourceText: chineseText }
+  );
+  assert.equal(chineseDraft.description, '晚餐');
+  assert.equal(chineseDraft.amount, 900);
+  assert.equal(chineseDraft.splitMode, 'custom');
+  assert.deepEqual(chineseDraft.customSplits, [
+    { memberId: 'me', memberName: '我', amount: 600 },
+    { memberId: 'ming', memberName: '小明', amount: 300 },
+  ]);
 });
 
 test('local parser converts percentage splits into exact currency amounts', () => {
