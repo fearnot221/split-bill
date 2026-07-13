@@ -107,16 +107,28 @@ window.visualViewport?.addEventListener('scroll', syncVisualViewport);
 document.addEventListener('focusin', keepFocusedControlVisible);
 
 /* ===== 工具 ===== */
+function currencyLabel() {
+  const configured = state.data?.group?.currency || 'NT$';
+  return /^[A-Za-z$€£¥₩₹₫₱฿₽₺₪₴₦₲₡₭₮₵₸]{1,5}$/u.test(configured)
+    ? configured
+    : 'NT$';
+}
+
 function fmt(n) {
   const abs = Math.abs(n);
   const s = Number.isInteger(abs)
     ? abs.toLocaleString()
     : abs.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const configured = state.data?.group?.currency || 'NT$';
-  const currency = /^[A-Za-z$€£¥₩₹₫₱฿₽₺₪₴₦₲₡₭₮₵₸]{1,5}$/u.test(configured)
-    ? configured
-    : 'NT$';
-  return (n < 0 ? `-${currency}` : currency) + s;
+  return (n < 0 ? `-${currencyLabel()}` : currencyLabel()) + s;
+}
+
+function fmtCompact(n) {
+  const abs = Math.abs(n);
+  if (abs < 100_000) return fmt(n);
+  const [divisor, unit] = abs >= 10_000_000 ? [100_000_000, '億'] : [10_000, '萬'];
+  const shortened = Math.floor((abs / divisor) * 10) / 10;
+  const value = shortened.toLocaleString('zh-TW', { maximumFractionDigits: 1 });
+  return `${n < 0 ? '-' : ''}${currencyLabel()}${value}${unit}`;
 }
 
 // 以本地時區取得今天日期（toISOString 是 UTC，凌晨會差一天）
@@ -147,10 +159,13 @@ function toast(msg) {
 // 數字滾動：從目前值補間到新值（約 0.4 秒）
 const REDUCED_MOTION = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-function animateNumber(el, target, prefix = '') {
+function animateNumber(el, target, prefix = '', compact = false) {
   const from = el._num ?? 0;
   el._num = target;
-  const render = (value) => (prefix && value > 0 ? prefix : '') + fmt(value);
+  const render = (value) => (prefix && value > 0 ? prefix : '') + (compact ? fmtCompact(value) : fmt(value));
+  const exact = (prefix && target > 0 ? prefix : '') + fmt(target);
+  el.title = exact;
+  el.setAttribute('aria-label', exact);
   if (from === target || REDUCED_MOTION) { el.textContent = render(target); return; }
   cancelAnimationFrame(el._raf);
   const start = performance.now();
@@ -274,10 +289,10 @@ function renderAll() {
   // 摘要列：整本帳的總支出／總收入／淨額（一趟旅行一本帳，不以月份切分）
   const { totalIncome } = state.data;
   const net = Math.round((totalIncome - total) * 100) / 100;
-  animateNumber($('#total-amount'), total);
-  animateNumber($('#total-income'), totalIncome);
+  animateNumber($('#total-amount'), total, '', true);
+  animateNumber($('#total-income'), totalIncome, '', true);
   const netEl = $('#net-amount');
-  animateNumber(netEl, net, net > 0 ? '+' : '');
+  animateNumber(netEl, net, net > 0 ? '+' : '', true);
   netEl.className = 'stat-value ' + (net > 0.005 ? 'positive' : net < -0.005 ? 'negative' : '');
 
   renderFilterChips();
