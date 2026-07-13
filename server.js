@@ -244,7 +244,8 @@ function validateExpenseInput(groupId, body) {
   let amountCents;
   try {
     amountCents = moneyToCents(body.amount);
-  } catch {
+  } catch (error) {
+    if (error instanceof RangeError) return { error: '金額超過系統上限（9,999,999,999.99）' };
     return { error: '金額最多只能有兩位小數' };
   }
   if (amountCents <= 0) return { error: '金額必須大於 0' };
@@ -273,7 +274,8 @@ function validateExpenseInput(groupId, body) {
     let splitCents;
     try {
       splitCents = moneyToCents(split.amount);
-    } catch {
+    } catch (error) {
+      if (error instanceof RangeError) return { error: '分攤金額超過系統上限' };
       return { error: '分攤金額最多只能有兩位小數' };
     }
     if (splitCents < 0) return { error: '分攤金額不能小於 0' };

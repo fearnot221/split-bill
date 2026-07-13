@@ -136,6 +136,13 @@ test('API protects access, validates money, and rejects stale updates', async (t
     assert.equal(fractional.response.status, 400);
     assert.match(fractional.body.error, /兩位小數/);
 
+    const amountTooLarge = await request(`/api/groups/${groupId}/expenses`, {
+      method: 'POST',
+      body: { ...base, amount: 10_000_000_000, splits: [{ memberId, amount: 10_000_000_000 }] },
+    });
+    assert.equal(amountTooLarge.response.status, 400);
+    assert.match(amountTooLarge.body.error, /上限/);
+
     const duplicate = await request(`/api/groups/${groupId}/expenses`, {
       method: 'POST',
       body: {
@@ -182,6 +189,23 @@ test('API protects access, validates money, and rejects stale updates', async (t
     assert.equal(ledger.body.group.currency, 'NT$');
     assert.equal(ledger.body.total, 0.01);
     assert.deepEqual(ledger.body.settlements, [{ from: memberId, to: payerId, amount: 0.01 }]);
+
+    const settled = await request(`/api/groups/${groupId}/expenses`, {
+      method: 'POST',
+      body: {
+        payerId: memberId,
+        description: '結算轉帳',
+        amount: 0.01,
+        category: '轉帳',
+        expenseDate: '2026-07-13',
+        kind: 'expense',
+        splits: [{ memberId: payerId, amount: 0.01 }],
+      },
+    });
+    assert.equal(settled.response.status, 200);
+    const afterSettlement = await request(`/api/groups/${groupId}`);
+    assert.deepEqual(afterSettlement.body.settlements, []);
+    assert.equal(afterSettlement.body.total, 0.01);
   });
 
   await t.test('uses optimistic versions for edits', async () => {

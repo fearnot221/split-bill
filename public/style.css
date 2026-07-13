@@ -132,7 +132,7 @@ svg { display: block; }
   padding: 12px 0 10px;
   min-width: 0;
 }
-.stat + .stat { border-left: 1px solid var(--rule); padding-left: 16px; }
+.stat + .stat { border-left: 1px solid var(--rule); padding-left: 12px; }
 .stat-label {
   display: block;
   font-size: .68rem;
@@ -143,7 +143,7 @@ svg { display: block; }
 .stat-value {
   display: block;
   font-family: var(--mono);
-  font-size: 1.1rem;
+  font-size: 1rem;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   overflow: hidden;
@@ -248,7 +248,19 @@ select {
 /* ===== 篩選列與分類 ===== */
 .filter-bar { margin-bottom: 4px; }
 .filter-bar input[type="search"] { margin-top: 0; }
-.filter-bar .chip-row { margin: 10px 0 0; }
+.filter-bar .chip-row { margin: 8px 0 0; }
+.filter-kind { margin-top: 10px; }
+.filter-kind .seg-btn { flex: 1; padding: 6px 8px; }
+.filter-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 8px 0 12px;
+  color: var(--sub);
+  font-size: .8rem;
+  font-weight: 600;
+}
 
 .chip-row { display: flex; flex-wrap: wrap; gap: 2px 4px; margin-bottom: 16px; }
 .chip {
@@ -334,7 +346,6 @@ select {
 }
 .expense-item:active { transform: scale(.995); }
 .expense-item:hover { background: var(--fill); }
-.expense-item.transfer { cursor: default; }
 .expense-icon {
   width: 26px;
   height: 26px;
@@ -432,6 +443,18 @@ select {
   flex-wrap: wrap;
   font-weight: 600;
 }
+.settle-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 230px;
+  min-width: 0;
+}
+.settle-party {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .settle-arrow { color: var(--sub); }
 .settle-amount {
   margin-left: auto;
@@ -504,6 +527,50 @@ select {
 .range-dash { color: var(--sub); flex-shrink: 0; }
 #stats-presets { margin: 10px 0 14px; }
 #tab-stats .stat-strip { border-top: none; margin-bottom: 26px; }
+.stats-caption {
+  color: var(--sub);
+  font-size: .76rem;
+  margin: -2px 0 4px;
+}
+
+.daily-list { list-style: none; }
+.daily-list li { padding: 11px 0 13px; border-bottom: 1px solid var(--rule); }
+.daily-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 7px;
+}
+.daily-date { font-size: .84rem; font-weight: 600; }
+.daily-net {
+  color: var(--sub);
+  font-family: var(--mono);
+  font-size: .8rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.daily-net.positive { color: var(--green); }
+.daily-net.negative { color: var(--red); }
+.daily-line {
+  display: grid;
+  grid-template-columns: 22px minmax(40px, 1fr) minmax(76px, auto);
+  align-items: center;
+  gap: 8px;
+  min-height: 20px;
+}
+.daily-label { color: var(--sub); font-size: .7rem; font-weight: 600; }
+.daily-track { height: 4px; background: var(--fill); overflow: hidden; }
+.daily-fill { display: block; height: 100%; transition: width .5s cubic-bezier(.22, 1, .36, 1); }
+.daily-fill.expense { background: var(--red); }
+.daily-fill.income { background: var(--green); }
+.daily-value {
+  font-family: var(--mono);
+  font-size: .76rem;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
 
 .bar-list { list-style: none; }
 .bar-list li { padding: 11px 0; border-bottom: 1px solid var(--rule); }

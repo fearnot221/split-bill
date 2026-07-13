@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="theme-color" content="#f5f3ee">
   <title>分帳小工具 — 記帳分帳</title>
-  <link rel="stylesheet" href="style.css?v=14">
+  <link rel="stylesheet" href="style.css?v=15">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%2344705a'/><text x='50' y='72' font-size='60' text-anchor='middle' fill='white' font-family='Helvetica,Arial,sans-serif' font-weight='bold'>$</text></svg>">
 </head>
 <body>
@@ -43,7 +43,17 @@
         <div class="filter-bar">
           <label class="visually-hidden" for="filter-text">搜尋紀錄</label>
           <input type="search" id="filter-text" placeholder="搜尋說明、付款人…" autocomplete="off">
+          <div class="seg filter-kind" id="filter-kind" aria-label="紀錄類型">
+            <button type="button" class="seg-btn active" data-kind="all" aria-pressed="true">全部</button>
+            <button type="button" class="seg-btn" data-kind="expense" aria-pressed="false">支出</button>
+            <button type="button" class="seg-btn" data-kind="income" aria-pressed="false">收入</button>
+            <button type="button" class="seg-btn" data-kind="transfer" aria-pressed="false">轉帳</button>
+          </div>
           <div class="chip-row" id="filter-cats"></div>
+          <div id="filter-summary" class="filter-summary hidden" role="status">
+            <span id="filter-count"></span>
+            <button type="button" id="btn-clear-filters" class="pill-btn">清除篩選</button>
+          </div>
         </div>
         <ul id="expense-list" class="expense-list"></ul>
         <p id="expense-empty" class="empty-hint hidden">還沒有任何紀錄，點右下角「＋」新增第一筆吧！</p>
@@ -92,6 +102,12 @@
             <span class="stat-label">淨額</span>
             <span class="stat-value" id="stat-net">NT$0</span>
           </div>
+        </div>
+        <div class="card">
+          <h2>每日收支</h2>
+          <p id="daily-caption" class="stats-caption hidden"></p>
+          <ul id="daily-stats" class="daily-list"></ul>
+          <p id="daily-empty" class="empty-hint hidden">這段期間沒有收支紀錄</p>
         </div>
         <div class="card">
           <h2>分類統計</h2>
@@ -146,7 +162,7 @@
         </label>
         <div class="row-2">
           <label>金額
-            <input type="number" id="exp-amount" placeholder="0" min="0.01" step="0.01" inputmode="decimal" required>
+            <input type="number" id="exp-amount" placeholder="0" min="0.01" max="9999999999.99" step="0.01" inputmode="decimal" required>
           </label>
           <label>日期
             <input type="date" id="exp-date" required>
@@ -194,6 +210,6 @@
 
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
-  <script src="app.js?v=17"></script>
+  <script src="app.js?v=18"></script>
 </body>
 </html>

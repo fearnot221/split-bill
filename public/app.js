@@ -44,6 +44,7 @@ let state = {
   data: null,          // 伺服器回傳的帳本資料
   filterText: '',
   filterCat: '全部',
+  filterKind: 'all',
   statsFrom: '',       // 統計起始日（'' = 不限）
   statsTo: '',         // 統計結束日（'' = 不限）
   editingId: null,     // 正在編輯的紀錄 id（null = 新增）
@@ -112,8 +113,8 @@ function animateNumber(el, target, prefix = '') {
 }
 
 // 長條圖從 0 長到目標寬度（重繪後下一影格再套用寬度）
-function animateBars(container) {
-  const fills = container.querySelectorAll('.bar-fill');
+function animateBars(container, selector = '.bar-fill') {
+  const fills = container.querySelectorAll(selector);
   fills.forEach((f) => {
     const w = f.style.width;
     f.style.width = '0%';
@@ -166,7 +167,7 @@ function escapeHtml(s) {
 }
 
 const isTransfer = (e) => TRANSFER_CATS.includes(e.category);
-const isIncome = (e) => e.kind === 'income';
+const isIncome = (e) => e.kind === 'income' && !isTransfer(e);
 const isSpend = (e) => !isIncome(e) && !isTransfer(e);
 
 function addDays(iso, n) {
@@ -222,12 +223,17 @@ function renderAll() {
 
 /* ===== 支出列表（含搜尋 / 分類篩選） ===== */
 function matchesFilter(e) {
+  if (state.filterKind === 'expense' && !isSpend(e)) return false;
+  if (state.filterKind === 'income' && !isIncome(e)) return false;
+  if (state.filterKind === 'transfer' && !isTransfer(e)) return false;
   if (state.filterCat !== '全部' && e.category !== state.filterCat) return false;
   const q = state.filterText.trim().toLowerCase();
   if (!q) return true;
   const haystack = [
     e.description,
     e.note || '',
+    e.category,
+    isTransfer(e) ? '轉帳 還款' : isIncome(e) ? '收入 收款' : '支出 付款',
     memberName(e.payer_id),
     ...e.splits.map((s) => memberName(s.member_id)),
   ].join(' ').toLowerCase();
@@ -261,6 +267,11 @@ function renderExpenses() {
   empty.textContent = state.data.expenses.length === 0
     ? '還沒有任何紀錄，點右下角「＋」新增第一筆吧！'
     : '沒有符合條件的紀錄';
+  const filtering = !!state.filterText.trim()
+    || state.filterCat !== '全部'
+    || state.filterKind !== 'all';
+  $('#filter-summary').classList.toggle('hidden', !filtering);
+  $('#filter-count').textContent = `顯示 ${expenses.length} / ${state.data.expenses.length} 筆`;
 
   // 依日期分組
   const days = [];
@@ -346,14 +357,33 @@ function renderBalances(members, balances) {
 
 function renderSettlements(settlements) {
   $('#settle-empty').classList.toggle('hidden', settlements.length > 0);
-  $('#settlement-list').innerHTML = settlements.map((s) => `
-    <li>
-      ${escapeHtml(memberName(s.from))}
-      <span class="settle-arrow">→</span>
-      ${escapeHtml(memberName(s.to))}
-      <span class="settle-amount">${fmt(s.amount)}</span>
+  $('#settlement-list').innerHTML = settlements.map((s, index) => `
+    <li data-index="${index}">
+      <div class="settle-main">
+        <span class="settle-party">${escapeHtml(memberName(s.from))}</span>
+        <span class="settle-arrow">→</span>
+        <span class="settle-party">${escapeHtml(memberName(s.to))}</span>
+        <span class="settle-amount">${fmt(s.amount)}</span>
+      </div>
+      <button type="button" class="settle-done" data-index="${index}">
+        ${ICONS.transfer}<span>記錄轉帳</span>
+      </button>
     </li>`).join('');
 }
+
+$('#settlement-list').addEventListener('click', (ev) => {
+  const button = ev.target.closest('.settle-done');
+  if (!button) return;
+  const settlement = state.data?.settlements[Number(button.dataset.index)];
+  if (!settlement) return;
+  openExpenseModal();
+  $('#exp-payer').value = settlement.from;
+  setKind('transfer');
+  renderTransferTargets(settlement.to);
+  $('#exp-amount').value = settlement.amount;
+  $('#exp-desc').value = '結算轉帳';
+  expenseFormBaseline = expenseDraftSignature();
+});
 
 /* ===== 統計（以天為單位的日期區間） ===== */
 function inStatsRange(e) {
@@ -377,6 +407,50 @@ function renderStats() {
   netEl.className = 'stat-value ' + (net > 0.005 ? 'positive' : net < -0.005 ? 'negative' : '');
 
   $('#stats-empty').classList.toggle('hidden', filtered.length > 0);
+
+  // 每日收支：只呈現最近 14 個有紀錄日，轉帳不計入。
+  const byDate = new Map();
+  for (const e of inRange) {
+    if (isTransfer(e)) continue;
+    const day = byDate.get(e.expense_date) || { expense: 0, income: 0 };
+    if (isIncome(e)) day.income += e.amount;
+    else day.expense += e.amount;
+    byDate.set(e.expense_date, day);
+  }
+  const allDays = [...byDate.entries()].sort(([left], [right]) => left.localeCompare(right));
+  const visibleDays = allDays.slice(-14);
+  const dailyEmpty = visibleDays.length === 0;
+  $('#daily-empty').classList.toggle('hidden', !dailyEmpty);
+  $('#daily-caption').classList.toggle('hidden', allDays.length <= 14);
+  $('#daily-caption').textContent = allDays.length > 14 ? '顯示最近 14 個有紀錄日' : '';
+  const dailyMaximum = Math.max(
+    ...visibleDays.flatMap(([, day]) => [day.expense, day.income]),
+    1
+  );
+  $('#daily-stats').innerHTML = visibleDays.map(([date, day]) => {
+    const [year, month, dateOfMonth] = date.split('-').map(Number);
+    const weekday = '日一二三四五六'[new Date(year, month - 1, dateOfMonth).getDay()];
+    const dateLabel = `${year === new Date().getFullYear() ? '' : `${year}/`}${month}/${dateOfMonth} 週${weekday}`;
+    const net = Math.round((day.income - day.expense) * 100) / 100;
+    const netClass = net > 0.005 ? 'positive' : net < -0.005 ? 'negative' : '';
+    return `
+      <li>
+        <div class="daily-head">
+          <span class="daily-date">${dateLabel}</span>
+          <span class="daily-net ${netClass}">淨額 ${net > 0 ? '+' : ''}${fmt(net)}</span>
+        </div>
+        <div class="daily-line">
+          <span class="daily-label">支</span>
+          <span class="daily-track"><span class="daily-fill expense" style="width:${Math.round(day.expense / dailyMaximum * 100)}%"></span></span>
+          <span class="daily-value">${fmt(day.expense)}</span>
+        </div>
+        <div class="daily-line">
+          <span class="daily-label">收</span>
+          <span class="daily-track"><span class="daily-fill income" style="width:${Math.round(day.income / dailyMaximum * 100)}%"></span></span>
+          <span class="daily-value">${fmt(day.income)}</span>
+        </div>
+      </li>`;
+  }).join('');
 
   // 分類統計
   const byCat = {};
@@ -425,6 +499,7 @@ function replayStatsBars() {
   if ($('#tab-stats').classList.contains('hidden') || REDUCED_MOTION) return;
   animateBars($('#cat-stats'));
   animateBars($('#member-stats'));
+  animateBars($('#daily-stats'), '.daily-fill');
 }
 
 /* ===== 分類 chips（清單來自帳本資料，可自訂新增） ===== */
@@ -434,18 +509,27 @@ const chipHtml = (cat, active) =>
 function renderFilterChips() {
   // 只有實際出現過的轉帳類別才顯示快篩 chip
   const extras = TRANSFER_CATS.filter((c) => state.data.expenses.some((e) => e.category === c));
-  const names = ['全部', ...state.data.categories.map((c) => c.name), ...extras];
+  const regular = state.data.categories.map((c) => c.name);
+  const categories = state.filterKind === 'transfer'
+    ? extras
+    : state.filterKind === 'all' ? [...regular, ...extras] : regular;
+  const names = ['全部', ...categories];
   const row = $('#filter-cats');
-  if (row.dataset.cats === names.join('|')) return; // 類別沒變就不重建
-  row.dataset.cats = names.join('|');
   if (!names.includes(state.filterCat)) state.filterCat = '全部';
-  row.innerHTML = names.map((c) => chipHtml(c, c === state.filterCat)).join('');
-  row.querySelectorAll('.chip').forEach((chip) => {
-    chip.addEventListener('click', () => {
-      row.querySelectorAll('.chip').forEach((c) => c.classList.toggle('active', c === chip));
-      state.filterCat = chip.dataset.cat;
-      renderExpenses();
+  const signature = JSON.stringify(names);
+  if (row.dataset.cats !== signature) {
+    row.dataset.cats = signature;
+    row.innerHTML = names.map((c) => chipHtml(c, c === state.filterCat)).join('');
+    row.querySelectorAll('.chip').forEach((chip) => {
+      chip.addEventListener('click', () => {
+        state.filterCat = chip.dataset.cat;
+        renderFilterChips();
+        renderExpenses();
+      });
     });
+  }
+  row.querySelectorAll('.chip').forEach((chip) => {
+    chip.classList.toggle('active', chip.dataset.cat === state.filterCat);
   });
 }
 
@@ -505,6 +589,35 @@ $$('.tab-btn').forEach((btn) => {
 $('#filter-text').addEventListener('input', (ev) => {
   state.filterText = ev.target.value;
   renderExpenses();
+});
+
+function syncKindFilter() {
+  $$('#filter-kind .seg-btn').forEach((button) => {
+    const active = button.dataset.kind === state.filterKind;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', String(active));
+  });
+}
+
+$$('#filter-kind .seg-btn').forEach((button) => {
+  button.addEventListener('click', () => {
+    state.filterKind = button.dataset.kind;
+    state.filterCat = '全部';
+    syncKindFilter();
+    renderFilterChips();
+    renderExpenses();
+  });
+});
+
+$('#btn-clear-filters').addEventListener('click', () => {
+  state.filterText = '';
+  state.filterCat = '全部';
+  state.filterKind = 'all';
+  $('#filter-text').value = '';
+  syncKindFilter();
+  renderFilterChips();
+  renderExpenses();
+  $('#filter-text').focus();
 });
 
 /* ===== 統計操作 ===== */
@@ -681,7 +794,7 @@ function openExpenseModal(expense = null) {
       <span class="split-name">${escapeHtml(m.name)}</span>
       <span class="split-amount-label">—</span>
       <input type="number" class="split-amount-input hidden" min="0" step="0.01"
-        inputmode="decimal" placeholder="0" value="${splitMap.get(m.id) ?? ''}">
+        max="9999999999.99" inputmode="decimal" placeholder="0" value="${splitMap.get(m.id) ?? ''}">
     </li>`).join('');
 
   $('#split-members').querySelectorAll('input').forEach((inp) => {
