@@ -69,6 +69,7 @@ let smartReceiptSequence = 0;
 let cachedSafetySessionId = null;
 let smartInputComposing = false;
 let smartInputCompositionJustEnded = false;
+let receiptPreviewContext = null;
 let visualViewportBaseline = window.visualViewport?.height || window.innerHeight;
 let visualViewportWidth = window.innerWidth;
 let focusVisibilityTimer = null;
@@ -786,23 +787,38 @@ function renderSmartReceipt() {
 
 function openReceiptPreview(source) {
   if (!source) return;
-  if (!source.startsWith('data:')) {
-    window.open(source, '_blank', 'noopener');
-    return;
-  }
-  const match = /^data:([^;,]+);base64,(.+)$/.exec(source);
-  if (!match) return;
-  try {
-    const binary = atob(match[2]);
-    const bytes = new Uint8Array(binary.length);
-    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
-    const objectUrl = URL.createObjectURL(new Blob([bytes], { type: match[1] }));
-    window.open(objectUrl, '_blank', 'noopener');
-    setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
-  } catch {
-    toast('無法開啟這張單據');
-  }
+  const view = $('#view-group');
+  const modal = $('#modal-expense');
+  receiptPreviewContext = {
+    returnFocus: document.activeElement,
+    viewWasInert: view.inert,
+    modalWasInert: modal.inert,
+  };
+  $('#receipt-lightbox-image').src = source;
+  $('#receipt-lightbox').classList.remove('hidden');
+  view.inert = true;
+  modal.inert = true;
+  document.body.classList.add('receipt-preview-open');
+  $('#btn-close-receipt-lightbox').focus({ preventScroll: true });
 }
+
+function closeReceiptPreview() {
+  const lightbox = $('#receipt-lightbox');
+  if (lightbox.classList.contains('hidden')) return;
+  lightbox.classList.add('hidden');
+  $('#receipt-lightbox-image').removeAttribute('src');
+  $('#view-group').inert = receiptPreviewContext?.viewWasInert ?? false;
+  $('#modal-expense').inert = receiptPreviewContext?.modalWasInert ?? false;
+  document.body.classList.remove('receipt-preview-open');
+  const returnFocus = receiptPreviewContext?.returnFocus;
+  receiptPreviewContext = null;
+  if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
+}
+
+$('#btn-close-receipt-lightbox').addEventListener('click', closeReceiptPreview);
+$('#receipt-lightbox').addEventListener('click', (event) => {
+  if (event.target === event.currentTarget) closeReceiptPreview();
+});
 
 async function setSmartReceiptFile(file) {
   if (!file) return;
@@ -1852,6 +1868,12 @@ $('#modal-expense').addEventListener('click', (ev) => {
   if (ev.target === ev.currentTarget) closeExpenseModal();
 });
 document.addEventListener('keydown', (ev) => {
+  if (!$('#receipt-lightbox').classList.contains('hidden')) {
+    if (ev.key === 'Escape') closeReceiptPreview();
+    if (ev.key === 'Escape' || ev.key === 'Tab') ev.preventDefault();
+    if (ev.key === 'Tab') $('#btn-close-receipt-lightbox').focus();
+    return;
+  }
   const modal = $('#modal-expense');
   if (modal.classList.contains('hidden') || modal.classList.contains('closing')) return;
   if ((ev.metaKey || ev.ctrlKey) && ev.key === 'Enter' && !expenseSubmitting) {
