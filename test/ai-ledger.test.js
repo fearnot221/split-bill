@@ -198,6 +198,21 @@ test('local parser handles k shorthand without truncating units', () => {
   assert.equal(weight.amount, null);
 });
 
+test('local parser validates thousands separators', () => {
+  for (const [text, expected] of [
+    ['晚餐1,234元我付', 1234],
+    ['旅館12,345.67元我付', 12345.67],
+    ['晚餐1,2元我付', null],
+    ['總額1,23,456，住宿', null],
+  ]) {
+    const draft = normalizeDraft(
+      localParse(text, { ...context, today: '2026-07-14', hasReceipt: false }),
+      { ...context, today: '2026-07-14', sourceText: text }
+    );
+    assert.equal(draft.amount, expected, text);
+  }
+});
+
 test('local parser handles everyone, income, and no-split phrases', () => {
   const everyoneText = '晚餐 1,500 大家均分我付';
   const everyone = normalizeDraft(
