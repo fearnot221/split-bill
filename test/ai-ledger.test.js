@@ -168,6 +168,9 @@ test('local parser keeps dates and times out of the amount', () => {
     ['7月10號晚餐500我付不分攤', 500, '2026-07-10', '晚餐'],
     ['明天早餐80我付不分攤', 80, '2026-07-15', '早餐'],
     ['後天晚餐500我付不分攤', 500, '2026-07-16', '晚餐'],
+    ['上週五晚餐500我付不分攤', 500, '2026-07-10', '晚餐'],
+    ['本星期一早餐80我付不分攤', 80, '2026-07-13', '早餐'],
+    ['下禮拜日晚餐500我付不分攤', 500, '2026-07-26', '晚餐'],
   ];
   for (const [text, amount, date, description] of cases) {
     const raw = localParse(text, { ...context, today: '2026-07-14', hasReceipt: false });
