@@ -1485,8 +1485,8 @@ function compressImage(file) {
         }
         const scale = Math.min(1, 1600 / Math.max(img.width, img.height));
         const canvas = document.createElement('canvas');
-        canvas.width = Math.round(img.width * scale);
-        canvas.height = Math.round(img.height * scale);
+        canvas.width = Math.max(1, Math.round(img.width * scale));
+        canvas.height = Math.max(1, Math.round(img.height * scale));
         const context = canvas.getContext('2d');
         if (!context) throw new Error('這個瀏覽器無法處理圖片');
         context.fillStyle = '#fff';
