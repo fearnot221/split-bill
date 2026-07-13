@@ -318,6 +318,17 @@ select {
   font-weight: 600;
 }
 .smart-receipt .receipt-thumb { width: 46px; height: 46px; }
+.receipt-preview {
+  display: block;
+  width: 46px;
+  height: 46px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  cursor: zoom-in;
+  flex-shrink: 0;
+}
 .smart-receipt span {
   flex: 1;
   min-width: 0;

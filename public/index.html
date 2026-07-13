@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="theme-color" content="#f5f3ee">
   <title>分帳小工具 — 記帳分帳</title>
-  <link rel="stylesheet" href="style.css?v=19">
+  <link rel="stylesheet" href="style.css?v=20">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%2344705a'/><text x='50' y='72' font-size='60' text-anchor='middle' fill='white' font-family='Helvetica,Arial,sans-serif' font-weight='bold'>$</text></svg>">
 </head>
 <body>
@@ -49,7 +49,10 @@
           <textarea id="smart-input" class="smart-input" rows="3" maxlength="2000"
             placeholder="例如：昨天晚餐 1,280，我付的，我跟小明、小美均分"></textarea>
           <div id="smart-receipt" class="smart-receipt hidden">
-            <img id="smart-receipt-thumb" class="receipt-thumb" alt="待分析單據縮圖">
+            <button type="button" id="btn-smart-receipt-view" class="receipt-preview"
+              aria-label="查看待分析單據" title="查看單據">
+              <img id="smart-receipt-thumb" class="receipt-thumb" alt="待分析單據縮圖">
+            </button>
             <span id="smart-receipt-name"></span>
             <button type="button" id="btn-smart-receipt-remove" class="icon-btn" aria-label="移除單據">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
@@ -253,6 +256,6 @@
 
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
-  <script src="app.js?v=31"></script>
+  <script src="app.js?v=32"></script>
 </body>
 </html>

@@ -678,6 +678,26 @@ function renderSmartReceipt() {
   }
 }
 
+function openReceiptPreview(source) {
+  if (!source) return;
+  if (!source.startsWith('data:')) {
+    window.open(source, '_blank', 'noopener');
+    return;
+  }
+  const match = /^data:([^;,]+);base64,(.+)$/.exec(source);
+  if (!match) return;
+  try {
+    const binary = atob(match[2]);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+    const objectUrl = URL.createObjectURL(new Blob([bytes], { type: match[1] }));
+    window.open(objectUrl, '_blank', 'noopener');
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+  } catch {
+    toast('無法開啟這張單據');
+  }
+}
+
 async function setSmartReceiptFile(file) {
   if (!file) return;
   if (smartAnalyzing) throw new Error('分析進行中，請先取消再更換單據');
@@ -1066,6 +1086,9 @@ $('#btn-smart-receipt-remove').addEventListener('click', () => {
   scheduleSmartDraftPersist();
   setSmartFeedback('');
 });
+$('#btn-smart-receipt-view').addEventListener('click', () => {
+  openReceiptPreview(smartReceiptDataUrl);
+});
 $('#btn-smart-analyze').addEventListener('click', analyzeSmartEntry);
 $('#smart-input').addEventListener('keydown', (ev) => {
   if ((ev.metaKey || ev.ctrlKey) && ev.key === 'Enter') {
@@ -1384,8 +1407,7 @@ function renderReceiptUI() {
   $('#btn-receipt-pick').textContent = receiptTask
     ? '處理單據…'
     : hasImage ? '更換單據' : '附上單據照片';
-  $('#btn-receipt-view').classList.toggle('hidden',
-    !(receiptState.existing && !receiptState.removed && !receiptState.pending));
+  $('#btn-receipt-view').classList.toggle('hidden', !hasImage);
   $('#btn-receipt-remove').classList.toggle('hidden', !hasImage);
   $('.modal-actions button[type="submit"]').disabled = expenseSubmitting || !!receiptTask;
 }
@@ -1460,7 +1482,10 @@ $('#exp-receipt-file').addEventListener('change', async (ev) => {
 });
 
 $('#btn-receipt-view').addEventListener('click', () => {
-  if (receiptState.existing) window.open(`/uploads/${receiptState.existing}`, '_blank');
+  if (receiptState.pending) openReceiptPreview(receiptState.pending);
+  else if (receiptState.existing && !receiptState.removed) {
+    openReceiptPreview(`/uploads/${receiptState.existing}`);
+  }
 });
 
 $('#btn-receipt-remove').addEventListener('click', () => {
