@@ -4,6 +4,23 @@ const $$ = (sel) => document.querySelectorAll(sel);
 
 let overview = null;
 
+function syncDialogViewport() {
+  const viewport = window.visualViewport;
+  document.documentElement.style.setProperty(
+    '--visual-viewport-height',
+    `${viewport?.height || window.innerHeight}px`
+  );
+  document.documentElement.style.setProperty(
+    '--visual-viewport-top',
+    `${viewport?.offsetTop || 0}px`
+  );
+}
+
+syncDialogViewport();
+window.addEventListener('resize', syncDialogViewport);
+window.visualViewport?.addEventListener('resize', syncDialogViewport);
+window.visualViewport?.addEventListener('scroll', syncDialogViewport);
+
 /* ===== 工具 ===== */
 function fmt(n) {
   const abs = Math.abs(n);
@@ -165,8 +182,14 @@ function renderMembers() {
     btn.addEventListener('click', async () => {
       const li = btn.closest('li');
       const member = overview.members.find((m) => m.id === li.dataset.id);
-      const name = prompt(`把「${member.name}」改名為：`, member.name);
-      if (!name || name.trim() === member.name) return;
+      const name = await AppDialog.prompt({
+        title: '成員改名',
+        label: '新名稱',
+        value: member.name,
+        maxLength: 20,
+        confirmLabel: '儲存',
+      });
+      if (!name || name === member.name) return;
       try {
         await api(`/api/admin/members/${member.id}/rename`, {
           method: 'POST',
@@ -181,7 +204,12 @@ function renderMembers() {
     btn.addEventListener('click', async () => {
       const li = btn.closest('li');
       const member = overview.members.find((m) => m.id === li.dataset.id);
-      if (!confirm(`確定刪除成員「${member.name}」？`)) return;
+      if (!await AppDialog.confirm({
+        title: '刪除成員',
+        message: `確定刪除成員「${member.name}」？`,
+        confirmLabel: '刪除',
+        tone: 'danger',
+      })) return;
       try {
         await api(`/api/groups/${overview.group.id}/members/${member.id}`, { method: 'DELETE' });
         await reloadPanel('成員已刪除');
@@ -207,7 +235,12 @@ function renderCats() {
     btn.addEventListener('click', async () => {
       const li = btn.closest('li');
       const cat = overview.categories.find((c) => c.id === li.dataset.id);
-      if (!confirm(`確定刪除類別「${cat.name}」？`)) return;
+      if (!await AppDialog.confirm({
+        title: '刪除類別',
+        message: `確定刪除類別「${cat.name}」？`,
+        confirmLabel: '刪除',
+        tone: 'danger',
+      })) return;
       try {
         await api(`/api/groups/${overview.group.id}/categories/${cat.id}`, { method: 'DELETE' });
         await reloadPanel('類別已刪除');
@@ -249,7 +282,12 @@ function renderTrash() {
     btn.addEventListener('click', async () => {
       const li = btn.closest('li');
       const exp = overview.deleted.find((e) => e.id === li.dataset.id);
-      if (!confirm(`永久刪除「${exp.description}」？此動作無法復原。`)) return;
+      if (!await AppDialog.confirm({
+        title: '永久刪除帳目',
+        message: `「${exp.description}」將無法復原，確定要永久刪除？`,
+        confirmLabel: '永久刪除',
+        tone: 'danger',
+      })) return;
       try {
         await api(`/api/admin/expenses/${exp.id}`, { method: 'DELETE' });
         await reloadPanel('已永久刪除');
@@ -284,7 +322,12 @@ $('#form-admin-add-cat').addEventListener('submit', async (ev) => {
 });
 
 $('#btn-clear-trash').addEventListener('click', async () => {
-  if (!confirm(`清空回收桶？${overview.deleted.length} 筆紀錄將永久刪除，無法復原。`)) return;
+  if (!await AppDialog.confirm({
+    title: '清空回收桶',
+    message: `${overview.deleted.length} 筆紀錄將永久刪除，而且無法復原。`,
+    confirmLabel: '全部永久刪除',
+    tone: 'danger',
+  })) return;
   try {
     const r = await api('/api/admin/trash', { method: 'DELETE' });
     await reloadPanel(`已永久刪除 ${r.deleted} 筆`);

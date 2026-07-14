@@ -61,7 +61,7 @@ if (process.env.NODE_ENV === 'production' && !APP_PASSWORD && !ALLOW_PUBLIC_ACCE
 
 const db = require('./db');
 const openai = OPENAI_API_KEY
-  ? new OpenAI({ apiKey: OPENAI_API_KEY, timeout: OPENAI_TIMEOUT_MS, maxRetries: 1 })
+  ? new OpenAI({ apiKey: OPENAI_API_KEY, timeout: OPENAI_TIMEOUT_MS, maxRetries: 0 })
   : null;
 
 if (process.env.TRUST_PROXY === '1') app.set('trust proxy', 1);
@@ -453,7 +453,8 @@ function recordAiUsage({ provider, model, hasReceipt, success, startedAt, usage,
   }
 }
 
-function classifyAiError(error, aborted) {
+function classifyAiError(error, aborted, timedOut = false) {
+  if (timedOut) return 'timeout';
   if (aborted || error?.name === 'AbortError') return 'cancelled';
   const status = Number(error?.status);
   if (status === 429) return 'rate_limit';
@@ -527,6 +528,16 @@ app.post('/api/groups/:id/ai/parse', async (req, res) => {
   }
 
   const clientAbort = bindClientAbort(req, res);
+  const analysisController = new AbortController();
+  let timedOut = false;
+  const abortAnalysis = () => analysisController.abort(clientAbort.controller.signal.reason);
+  clientAbort.controller.signal.addEventListener('abort', abortAnalysis, { once: true });
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    const timeoutError = new Error('AI analysis deadline exceeded');
+    timeoutError.code = 'AI_ANALYSIS_TIMEOUT';
+    analysisController.abort(timeoutError);
+  }, OPENAI_TIMEOUT_MS);
 
   try {
     const result = await analyzeWithOpenAI({
@@ -542,30 +553,39 @@ app.post('/api/groups/:id/ai/parse', async (req, res) => {
           ? safetySessionId
           : req.params.id
       ).slice(0, 32)}`,
-      signal: clientAbort.controller.signal,
+      signal: analysisController.signal,
     });
     recordAiUsage({
       provider: 'openai', model: OPENAI_MODEL, hasReceipt: !!receiptDataUrl,
       success: true, startedAt, usage: result.usage,
     });
     const participantNotice = explicitParticipantNotice(context, result.draft);
+    const notices = [];
+    if (participantNotice) notices.push(participantNotice);
+    if (result.receiptDetailUpgradeFailed) {
+      notices.push(result.receiptDetailUpgradeTimedOut
+        ? '單據細節確認時間較長，已保留快速辨識結果，請確認金額與日期'
+        : '單據細節辨識未完成，已保留快速辨識結果，請確認金額與日期');
+    }
     return res.json({
       provider: 'openai',
       model: OPENAI_MODEL,
       draft: result.draft,
-      notices: participantNotice ? [participantNotice] : [],
+      notices,
     });
   } catch (error) {
     const cancelled = clientAbort.controller.signal.aborted;
     recordAiUsage({
       provider: 'openai', model: OPENAI_MODEL, hasReceipt: !!receiptDataUrl,
-      success: false, startedAt, usage: error.aiUsage,
-      errorCode: classifyAiError(error, cancelled),
+      success: false, startedAt, usage: error?.aiUsage,
+      errorCode: classifyAiError(error, cancelled, timedOut),
     });
     if (cancelled) return;
     const status = Number(error?.status);
     console.error('AI 帳目分析失敗:', status || '', error?.message || error);
-    const fallbackReason = status === 429
+    const fallbackReason = timedOut
+      ? 'AI 分析時間較長'
+      : status === 429
       ? 'AI 服務目前忙碌'
       : status === 401 || status === 403
         ? 'AI 服務設定暫時無法使用'
@@ -575,6 +595,8 @@ app.post('/api/groups/:id/ai/parse', async (req, res) => {
       notice: `${fallbackReason}，已改用基本文字規則分析`,
     }));
   } finally {
+    clearTimeout(timeout);
+    clientAbort.controller.signal.removeEventListener('abort', abortAnalysis);
     clientAbort.cleanup();
   }
 });

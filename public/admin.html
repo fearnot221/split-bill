@@ -2,11 +2,12 @@
 <html lang="zh-Hant">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content">
   <meta name="robots" content="noindex, nofollow">
-  <meta name="theme-color" content="#f5f3ee">
+  <meta name="theme-color" content="#f5f3ee" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#191813" media="(prefers-color-scheme: dark)">
   <title>管理面板 — 分帳小工具</title>
-  <link rel="stylesheet" href="style.css?v=18">
+  <link rel="stylesheet" href="style.css?v=32">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%2344705a'/><text x='50' y='72' font-size='60' text-anchor='middle' fill='white' font-family='Helvetica,Arial,sans-serif' font-weight='bold'>$</text></svg>">
 </head>
 <body>
@@ -102,8 +103,35 @@
     </main>
   </div>
 
+  <dialog id="app-dialog" class="app-dialog app-dialog--compact"
+    aria-labelledby="app-dialog-title" aria-describedby="app-dialog-message">
+    <section class="app-dialog__surface">
+      <header class="app-dialog__header">
+        <h2 id="app-dialog-title">確認操作</h2>
+        <button type="button" id="app-dialog-close" class="icon-btn" aria-label="關閉">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+      </header>
+      <form id="app-dialog-form" class="app-dialog__form">
+        <div class="app-dialog__body">
+          <p id="app-dialog-message" class="app-dialog__message"></p>
+          <label id="app-dialog-prompt-wrap" class="app-dialog__prompt hidden">
+            <span id="app-dialog-prompt-label">名稱</span>
+            <input type="text" id="app-dialog-input" autocomplete="off">
+          </label>
+          <p id="app-dialog-error" class="app-dialog__error hidden" role="alert"></p>
+        </div>
+        <div class="app-dialog__actions">
+          <button type="button" id="app-dialog-cancel" class="btn btn-ghost">取消</button>
+          <button type="submit" id="app-dialog-confirm" class="btn btn-primary">繼續</button>
+        </div>
+      </form>
+    </section>
+  </dialog>
+
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
-  <script src="admin.js?v=10"></script>
+  <script src="ui-dialog.js?v=1"></script>
+  <script src="admin.js?v=11"></script>
 </body>
 </html>

@@ -7,6 +7,8 @@ const {
   analyzeWithOpenAI,
   buildOpenAIRequest,
   localParse,
+  mergeUsage,
+  needsHighDetailReceiptRetry,
   normalizeDraft,
 } = require('../lib/ai-ledger');
 
@@ -642,7 +644,7 @@ test('builds a private multimodal Responses API request', () => {
   assert.equal(request.model, 'gpt-5.6-sol');
   assert.equal(request.store, false);
   assert.equal(request.safety_identifier, 'ledger_test');
-  assert.equal(request.max_output_tokens, 2000);
+  assert.equal(request.max_output_tokens, 1200);
   assert.match(request.instructions, /最終應付／實付總額/);
   assert.equal(request.input[0].content[1].type, 'input_image');
   assert.equal(request.input[0].content[1].detail, 'high');
@@ -729,6 +731,382 @@ test('parses and normalizes a structured OpenAI response', async () => {
     outputTokens: 48,
   });
   assert.equal(receivedOptions.signal, abortController.signal);
+});
+
+test('uses low-detail vision first and upgrades only incomplete receipt drafts', async () => {
+  const requests = [];
+  const responseFor = (overrides, usage) => ({
+    output_text: JSON.stringify({
+      isLedgerEntry: true,
+      kind: 'expense',
+      description: '咖啡',
+      amount: 120,
+      category: '餐飲',
+      expenseDate: '2026-07-14',
+      payerName: '我',
+      participantNames: ['我'],
+      splitMode: 'none',
+      customSplits: [],
+      transferToName: null,
+      note: null,
+      confidence: 0.98,
+      warnings: [],
+      ...overrides,
+    }),
+    output: [],
+    usage,
+  });
+  const responses = [
+    responseFor({ description: '', amount: null, confidence: 0.4 }, {
+      input_tokens: 90,
+      input_tokens_details: { cached_tokens: 10 },
+      output_tokens: 20,
+    }),
+    responseFor({}, {
+      input_tokens: 180,
+      input_tokens_details: { cached_tokens: 30 },
+      output_tokens: 40,
+    }),
+  ];
+  const client = {
+    responses: {
+      create: async (request) => {
+        requests.push(request);
+        return responses.shift();
+      },
+    },
+  };
+  const result = await analyzeWithOpenAI({
+    client,
+    model: 'gpt-5.6-sol',
+    text: '',
+    receiptDataUrl: 'data:image/jpeg;base64,/9j/',
+    context,
+    today: '2026-07-14',
+    safetyIdentifier: 'ledger_test',
+  });
+
+  assert.deepEqual(requests.map((request) => request.input[0].content[1].detail), ['low', 'high']);
+  assert.equal(result.draft.ready, true);
+  assert.equal(result.draft.amount, 120);
+  assert.equal(result.receiptDetailUpgraded, true);
+  assert.deepEqual(result.usage, {
+    inputTokens: 270,
+    cachedInputTokens: 40,
+    outputTokens: 60,
+  });
+  assert.equal(needsHighDetailReceiptRetry(result), false);
+  assert.deepEqual(mergeUsage(null, { inputTokens: 5, outputTokens: 2 }), {
+    inputTokens: 5,
+    cachedInputTokens: 0,
+    outputTokens: 2,
+  });
+});
+
+test('returns the low-detail receipt draft when its high-detail upgrade fails', async () => {
+  let requestCount = 0;
+  const client = {
+    responses: {
+      create: async () => {
+        requestCount += 1;
+        if (requestCount === 2) throw new Error('vision upgrade unavailable');
+        return {
+          output_text: JSON.stringify({
+            isLedgerEntry: true,
+            kind: 'expense',
+            description: '單據',
+            amount: null,
+            category: '其他',
+            expenseDate: '2026-07-14',
+            payerName: '我',
+            participantNames: ['我'],
+            splitMode: 'none',
+            customSplits: [],
+            transferToName: null,
+            note: null,
+            confidence: 0.5,
+            warnings: ['影像較模糊'],
+          }),
+          output: [],
+          usage: { input_tokens: 95, output_tokens: 25 },
+        };
+      },
+    },
+  };
+  const result = await analyzeWithOpenAI({
+    client,
+    model: 'gpt-5.6-sol',
+    text: '',
+    receiptDataUrl: 'data:image/jpeg;base64,/9j/',
+    context,
+    today: '2026-07-14',
+    safetyIdentifier: 'ledger_test',
+  });
+
+  assert.equal(requestCount, 2);
+  assert.equal(result.draft.ready, false);
+  assert.equal(result.receiptDetailUpgradeFailed, true);
+  assert.deepEqual(result.usage, {
+    inputTokens: 95,
+    cachedInputTokens: 0,
+    outputTokens: 25,
+  });
+});
+
+test('keeps useful low-detail fields when the high-detail result is worse', async () => {
+  const responses = [
+    {
+      output_text: JSON.stringify({
+        isLedgerEntry: true,
+        kind: 'expense',
+        description: '',
+        amount: 120,
+        category: '餐飲',
+        expenseDate: '2026-07-14',
+        payerName: '我',
+        participantNames: ['我'],
+        splitMode: 'none',
+        customSplits: [],
+        transferToName: null,
+        note: null,
+        confidence: 0.5,
+        warnings: ['品項較模糊'],
+      }),
+      output: [],
+      usage: { input_tokens: 90, output_tokens: 20 },
+    },
+    {
+      output_text: JSON.stringify({
+        isLedgerEntry: true,
+        kind: 'expense',
+        description: '咖啡',
+        amount: null,
+        category: '餐飲',
+        expenseDate: '2026-07-14',
+        payerName: '我',
+        participantNames: ['我'],
+        splitMode: 'none',
+        customSplits: [],
+        transferToName: null,
+        note: null,
+        confidence: 0.7,
+        warnings: ['金額較模糊'],
+      }),
+      output: [],
+      usage: { input_tokens: 180, output_tokens: 30 },
+    },
+  ];
+  const client = { responses: { create: async () => responses.shift() } };
+  const result = await analyzeWithOpenAI({
+    client,
+    model: 'gpt-5.6-sol',
+    text: '',
+    receiptDataUrl: 'data:image/jpeg;base64,/9j/',
+    context,
+    today: '2026-07-14',
+    safetyIdentifier: 'ledger_test',
+  });
+
+  assert.equal(result.draft.amount, 120);
+  assert.equal(result.draft.description, '咖啡');
+  assert.equal(result.draft.ready, true);
+  assert.equal(result.draft.confidence, 0.5);
+  assert.doesNotMatch(result.draft.warnings.join(' '), /尚未辨識(金額|項目說明)/);
+  assert.match(result.draft.warnings.join(' '), /辨識結果不一致/);
+  assert.deepEqual(result.usage, {
+    inputTokens: 270,
+    cachedInputTokens: 0,
+    outputTokens: 50,
+  });
+});
+
+test('preserves the low-detail draft when the high-detail deadline expires', async () => {
+  const controller = new AbortController();
+  let requestCount = 0;
+  const client = {
+    responses: {
+      create: async () => {
+        requestCount += 1;
+        if (requestCount === 2) {
+          const timeoutError = new Error('deadline');
+          timeoutError.code = 'AI_ANALYSIS_TIMEOUT';
+          controller.abort(timeoutError);
+          throw timeoutError;
+        }
+        return {
+          output_text: JSON.stringify({
+            isLedgerEntry: true,
+            kind: 'expense',
+            description: '單據',
+            amount: 120,
+            category: '餐飲',
+            expenseDate: '2026-07-14',
+            payerName: '我',
+            participantNames: ['我'],
+            splitMode: 'none',
+            customSplits: [],
+            transferToName: null,
+            note: null,
+            confidence: 0.5,
+            warnings: ['影像較模糊'],
+          }),
+          output: [],
+          usage: { input_tokens: 95, output_tokens: 25 },
+        };
+      },
+    },
+  };
+  const result = await analyzeWithOpenAI({
+    client,
+    model: 'gpt-5.6-sol',
+    text: '',
+    receiptDataUrl: 'data:image/jpeg;base64,/9j/',
+    context,
+    today: '2026-07-14',
+    safetyIdentifier: 'ledger_test',
+    signal: controller.signal,
+  });
+
+  assert.equal(result.draft.amount, 120);
+  assert.equal(result.receiptDetailUpgradeFailed, true);
+  assert.equal(result.receiptDetailUpgradeTimedOut, true);
+  assert.deepEqual(result.usage, {
+    inputTokens: 95,
+    cachedInputTokens: 0,
+    outputTokens: 25,
+  });
+});
+
+test('does not use high detail solely for a normalized transfer-target issue', async () => {
+  let requestCount = 0;
+  const client = {
+    responses: {
+      create: async () => {
+        requestCount += 1;
+        return {
+          output_text: JSON.stringify({
+            isLedgerEntry: true,
+            kind: 'transfer',
+            description: '還款',
+            amount: 120,
+            category: '轉帳',
+            expenseDate: '2026-07-14',
+            payerName: '我',
+            participantNames: [],
+            splitMode: 'none',
+            customSplits: [],
+            transferToName: '不在帳本的人',
+            note: null,
+            confidence: 0.95,
+            warnings: [],
+          }),
+          output: [],
+          usage: { input_tokens: 90, output_tokens: 20 },
+        };
+      },
+    },
+  };
+  const result = await analyzeWithOpenAI({
+    client,
+    model: 'gpt-5.6-sol',
+    text: '',
+    receiptDataUrl: 'data:image/jpeg;base64,/9j/',
+    context,
+    today: '2026-07-14',
+    safetyIdentifier: 'ledger_test',
+  });
+
+  assert.equal(requestCount, 1);
+  assert.equal(result.draft.ready, false);
+});
+
+test('uses high detail when the low-detail receipt date is missing', async () => {
+  const requests = [];
+  const makeResponse = (expenseDate) => ({
+    output_text: JSON.stringify({
+      isLedgerEntry: true,
+      kind: 'expense',
+      description: '咖啡',
+      amount: 120,
+      category: '餐飲',
+      expenseDate,
+      payerName: '我',
+      participantNames: ['我'],
+      splitMode: 'none',
+      customSplits: [],
+      transferToName: null,
+      note: null,
+      confidence: 0.95,
+      warnings: [],
+    }),
+    output: [],
+    usage: { input_tokens: 90, output_tokens: 20 },
+  });
+  const responses = [makeResponse(null), makeResponse('2026-07-13')];
+  const client = {
+    responses: {
+      create: async (request) => {
+        requests.push(request);
+        return responses.shift();
+      },
+    },
+  };
+  const result = await analyzeWithOpenAI({
+    client,
+    model: 'gpt-5.6-sol',
+    text: '',
+    receiptDataUrl: 'data:image/jpeg;base64,/9j/',
+    context,
+    today: '2026-07-14',
+    safetyIdentifier: 'ledger_test',
+  });
+
+  assert.deepEqual(requests.map((request) => request.input[0].content[1].detail), ['low', 'high']);
+  assert.equal(result.draft.expenseDate, '2026-07-13');
+});
+
+test('warns when neither receipt pass can identify the date', async () => {
+  let requestCount = 0;
+  const client = {
+    responses: {
+      create: async () => {
+        requestCount += 1;
+        return {
+          output_text: JSON.stringify({
+            isLedgerEntry: true,
+            kind: 'expense',
+            description: '咖啡',
+            amount: 120,
+            category: '餐飲',
+            expenseDate: null,
+            payerName: '我',
+            participantNames: ['我'],
+            splitMode: 'none',
+            customSplits: [],
+            transferToName: null,
+            note: null,
+            confidence: 0.95,
+            warnings: [],
+          }),
+          output: [],
+          usage: { input_tokens: 90, output_tokens: 20 },
+        };
+      },
+    },
+  };
+  const result = await analyzeWithOpenAI({
+    client,
+    model: 'gpt-5.6-sol',
+    text: '',
+    receiptDataUrl: 'data:image/jpeg;base64,/9j/',
+    context,
+    today: '2026-07-14',
+    safetyIdentifier: 'ledger_test',
+  });
+
+  assert.equal(requestCount, 2);
+  assert.equal(result.draft.expenseDate, '2026-07-14');
+  assert.match(result.draft.warnings.join(' '), /尚未辨識單據日期/);
 });
 
 test('preserves token usage when an OpenAI response cannot be parsed', async () => {

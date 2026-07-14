@@ -99,10 +99,10 @@ OPENAI_MODEL='供應商模型名稱' npm start
 - `OPENAI_MODEL`：帳目辨識模型，預設 `gpt-5.6-sol`
 - `OPENAI_BASE_URL`：選填的相容 Responses API 端點；未設定時使用 OpenAI 官方端點
 - `OPENAI_API_KEY_FILE`：選填的純文字或 JSON 金鑰檔案；`OPENAI_API_KEY` 未設定時使用
-- `OPENAI_TIMEOUT_MS`：單次 AI 請求逾時，預設 30 秒
+- `OPENAI_TIMEOUT_MS`：整次 AI 分析的最長等待時間，預設 30 秒
 - `AI_REQUESTS_PER_HOUR`：每個來源 IP 每小時上限，預設 30 次
 
-沒有設定金鑰時，應用程式會用本地基本規則解析文字，單據仍可附加至帳目，但不會進行影像辨識。AI 服務忙碌、逾時、設定失效或回傳格式異常時也會自動退回基本文字解析，保留可確認修改的草稿；若有單據，畫面會提示這次未辨識影像，圖片仍可隨帳目保存。AI 模式下，當次文字與單據會傳送至設定的 AI 服務供應商，請求設定 `store: false`；自訂供應商是否遵守此參數及其資料保存政策，仍以該供應商條款為準。API 金鑰只保留在伺服器端，不會傳到瀏覽器。每個瀏覽器 session 會產生隨機 UUID，經伺服器單向雜湊後只作為 Responses API `safety_identifier`，不寫入資料庫。管理統計只記錄模式、模型、是否含單據、成功狀態、延遲、token 數與粗分類錯誤，不保存文字、圖片、成員、來源 IP 或帳本識別，紀錄自動保留 180 天。實作依據 [Responses API](https://developers.openai.com/api/docs/guides/migrate-to-responses)、[Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs) 與 [Images and vision](https://developers.openai.com/api/docs/guides/images-vision) 官方文件。
+單據會先走快速影像辨識；只有金額、說明、日期缺漏、信心偏低或影像不清楚時，才在同一個總逾時內進一步確認細節。細節確認失敗或逾時時會保留快速草稿並提示核對，不會丟掉已辨識欄位。沒有設定金鑰時，應用程式會用本地基本規則解析文字，單據仍可附加至帳目，但不會進行影像辨識。AI 服務在取得任何 AI 草稿前忙碌、逾時、設定失效或回傳格式異常時，會自動退回基本文字解析，保留可確認修改的草稿；若有單據，畫面會提示這次未辨識影像，圖片仍可隨帳目保存。AI 模式下，當次文字與單據會傳送至設定的 AI 服務供應商，請求設定 `store: false`；自訂供應商是否遵守此參數及其資料保存政策，仍以該供應商條款為準。API 金鑰只保留在伺服器端，不會傳到瀏覽器。每個瀏覽器 session 會產生隨機 UUID，經伺服器單向雜湊後只作為 Responses API `safety_identifier`，不寫入資料庫。管理統計只記錄模式、模型、是否含單據、成功狀態、延遲、token 數與粗分類錯誤，不保存文字、圖片、成員、來源 IP 或帳本識別，紀錄自動保留 180 天。實作依據 [Responses API](https://developers.openai.com/api/docs/guides/migrate-to-responses)、[Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs) 與 [Images and vision](https://developers.openai.com/api/docs/guides/images-vision) 官方文件。
 
 ## 備份
 

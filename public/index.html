@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#f5f3ee" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#191813" media="(prefers-color-scheme: dark)">
   <title>分帳小工具 — 記帳分帳</title>
-  <link rel="stylesheet" href="style.css?v=31">
+  <link rel="stylesheet" href="style.css?v=32">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%2344705a'/><text x='50' y='72' font-size='60' text-anchor='middle' fill='white' font-family='Helvetica,Arial,sans-serif' font-weight='bold'>$</text></svg>">
 </head>
 <body>
@@ -223,8 +223,8 @@
   </div>
 
   <!-- ===== 新增 / 編輯支出 Modal ===== -->
-  <div id="modal-expense" class="modal hidden">
-    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+  <dialog id="modal-expense" class="app-dialog app-dialog--sheet" aria-labelledby="modal-title">
+    <section class="app-dialog__surface modal-card">
       <div class="modal-header">
         <h2 id="modal-title">新增支出</h2>
         <button id="btn-close-modal" class="icon-btn" aria-label="關閉">
@@ -254,12 +254,12 @@
           </label>
         </div>
         <label id="label-cats">分類</label>
-        <div id="exp-categories" class="chip-row"></div>
-        <label id="label-payer">付款人
-          <select id="exp-payer"></select>
+        <div id="exp-categories" class="chip-row" role="group" aria-labelledby="label-cats"></div>
+        <label id="label-payer" class="select-field">付款人
+          <select id="exp-payer" class="app-select"></select>
         </label>
-        <label id="label-transfer-to" class="hidden">匯給
-          <select id="exp-transfer-to"></select>
+        <label id="label-transfer-to" class="select-field hidden">匯給
+          <select id="exp-transfer-to" class="app-select"></select>
         </label>
         <div class="split-header">
           <label>分攤方式</label>
@@ -292,19 +292,46 @@
         <button type="submit" form="form-expense" class="btn btn-primary">儲存</button>
         <button type="button" id="btn-delete-expense" class="btn btn-ghost danger hidden">刪除</button>
       </div>
-    </div>
-  </div>
+    </section>
+  </dialog>
 
-  <div id="receipt-lightbox" class="receipt-lightbox hidden" role="dialog" aria-modal="true" aria-label="單據預覽">
+  <dialog id="receipt-lightbox" class="app-dialog app-dialog--viewer receipt-lightbox" aria-label="單據預覽">
     <button type="button" id="btn-close-receipt-lightbox" class="icon-btn"
       aria-label="關閉單據預覽" title="關閉">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
     </button>
     <img id="receipt-lightbox-image" alt="單據原圖" draggable="false">
-  </div>
+  </dialog>
+
+  <dialog id="app-dialog" class="app-dialog app-dialog--compact"
+    aria-labelledby="app-dialog-title" aria-describedby="app-dialog-message">
+    <section class="app-dialog__surface">
+      <header class="app-dialog__header">
+        <h2 id="app-dialog-title">確認操作</h2>
+        <button type="button" id="app-dialog-close" class="icon-btn" aria-label="關閉">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+      </header>
+      <form id="app-dialog-form" class="app-dialog__form">
+        <div class="app-dialog__body">
+          <p id="app-dialog-message" class="app-dialog__message"></p>
+          <label id="app-dialog-prompt-wrap" class="app-dialog__prompt hidden">
+            <span id="app-dialog-prompt-label">名稱</span>
+            <input type="text" id="app-dialog-input" autocomplete="off">
+          </label>
+          <p id="app-dialog-error" class="app-dialog__error hidden" role="alert"></p>
+        </div>
+        <div class="app-dialog__actions">
+          <button type="button" id="app-dialog-cancel" class="btn btn-ghost">取消</button>
+          <button type="submit" id="app-dialog-confirm" class="btn btn-primary">繼續</button>
+        </div>
+      </form>
+    </section>
+  </dialog>
 
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
-  <script src="app.js?v=51"></script>
+  <script src="ui-dialog.js?v=1"></script>
+  <script src="app.js?v=52"></script>
 </body>
 </html>

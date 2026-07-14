@@ -104,10 +104,10 @@ test('falls back to an editable local draft when OpenAI is unavailable', async (
   assert.match(body.notices.join(' '), /已套用分帳對象/);
   assert.match(body.notices.join(' '), /未辨識單據內容/);
   assert.doesNotMatch(body.draft.warnings.join(' '), /尚未設定 AI/);
-  assert.ok(upstreamRequests >= 1);
+  assert.equal(upstreamRequests, 1);
   assert.ok(upstreamBodies.every((requestBody) => requestBody.store === false));
-  assert.ok(upstreamBodies.every((requestBody) => requestBody.max_output_tokens === 2000));
+  assert.ok(upstreamBodies.every((requestBody) => requestBody.max_output_tokens === 1200));
   assert.ok(upstreamBodies.every((requestBody) => /^ledger_[0-9a-f]{32}$/.test(requestBody.safety_identifier)));
   assert.ok(upstreamBodies.every((requestBody) => !requestBody.safety_identifier.includes(safetySessionId)));
-  assert.ok(upstreamBodies.every((requestBody) => requestBody.input[0].content[1].detail === 'high'));
+  assert.ok(upstreamBodies.every((requestBody) => requestBody.input[0].content[1].detail === 'low'));
 });

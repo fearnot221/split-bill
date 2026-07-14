@@ -64,6 +64,7 @@ let smartDraftRestored = false;
 let smartDbPromise = null;
 let smartSpeechRecognition = null;
 let smartAnalyzeController = null;
+let smartProgressTimers = [];
 let smartReceiptTask = null;
 let smartReceiptSequence = 0;
 let cachedSafetySessionId = null;
@@ -71,6 +72,7 @@ let smartParticipantIds = new Set();
 let smartInputComposing = false;
 let smartInputCompositionJustEnded = false;
 let receiptPreviewContext = null;
+let receiptBackdropPointerDown = false;
 let visualViewportBaseline = window.visualViewport?.height || window.innerHeight;
 let visualViewportWidth = window.innerWidth;
 let focusVisibilityTimer = null;
@@ -253,7 +255,10 @@ function addDays(iso, n) {
 }
 
 function canPoll() {
-  return !document.hidden && $('#modal-expense').classList.contains('hidden');
+  return !document.hidden
+    && !$('#modal-expense').open
+    && !$('#receipt-lightbox').open
+    && !$('#app-dialog').open;
 }
 
 async function refresh({ poll = false } = {}) {
@@ -403,7 +408,12 @@ $('#expense-list').addEventListener('click', async (ev) => {
 
   if (action.matches('.expense-del')) {
     const deleteButton = action;
-    if (!confirm(`確定刪除「${expense.description}」？`)) return;
+    if (!await AppDialog.confirm({
+      title: '刪除帳目',
+      message: `確定刪除「${expense.description}」？刪除後可從管理面板的回收桶復原。`,
+      confirmLabel: '刪除',
+      tone: 'danger',
+    })) return;
     deleteButton.disabled = true;
     try {
       await api(`/api/groups/${state.groupId}/expenses/${expense.id}?version=${expense.version}`, {
@@ -646,7 +656,13 @@ function renderModalCats(selected) {
     });
   });
   row.querySelector('.chip-add').addEventListener('click', async () => {
-    const name = prompt('新類別名稱（最多 10 字）：')?.trim();
+    const name = await AppDialog.prompt({
+      title: '新增類別',
+      label: '類別名稱',
+      placeholder: '例如：咖啡、伴手禮',
+      maxLength: 10,
+      confirmLabel: '新增',
+    });
     if (!name) return;
     try {
       await api(`/api/groups/${state.groupId}/categories`, {
@@ -820,11 +836,11 @@ function renderSmartParticipants(members = state.data?.members || []) {
   syncSmartParticipantControls();
 }
 
-function smartProgressMessage() {
+function smartProgressMessage(stage = 0) {
   const hasText = !!$('#smart-input').value.trim();
   const hasReceipt = !!smartReceiptDataUrl;
   const selectedCount = selectedSmartParticipantIds().length;
-  const title = hasText && hasReceipt
+  let title = hasText && hasReceipt
     ? '正在比對單據與分帳內容'
     : hasReceipt ? '正在讀取單據' : '正在理解分帳內容';
   let detail = hasReceipt && !hasText
@@ -835,7 +851,23 @@ function smartProgressMessage() {
       ? `辨識帳目並套用已選的 ${selectedCount} 位成員`
       : `整理帳目並套用已選的 ${selectedCount} 位成員`;
   }
+  if (stage === 1) {
+    title = hasReceipt ? '正在核對單據細節' : '正在整理帳目草稿';
+    detail = hasReceipt
+      ? '確認金額、日期與分帳資訊'
+      : '確認付款人、分類與分帳方式';
+  } else if (stage >= 2) {
+    title = hasReceipt ? '單據內容較多，仍在辨識' : '正在完成帳目草稿';
+    detail = '完成後會開啟草稿供你確認';
+  }
   return { title, detail };
+}
+
+function updateSmartProgress(stage = 0) {
+  const { title, detail } = smartProgressMessage(stage);
+  $('#smart-progress-title').textContent = title;
+  $('#smart-progress-detail').textContent = detail;
+  return title;
 }
 
 function setSmartFeedback(message, error = false) {
@@ -861,6 +893,8 @@ function resizeSmartInput() {
 
 function setSmartAnalyzing(analyzing) {
   const moveFocusToCancel = analyzing && document.activeElement === $('#smart-input');
+  smartProgressTimers.forEach(clearTimeout);
+  smartProgressTimers = [];
   smartAnalyzing = analyzing;
   if (analyzing && smartSpeechRecognition
     && $('#btn-smart-voice').getAttribute('aria-pressed') === 'true') {
@@ -887,10 +921,12 @@ function setSmartAnalyzing(analyzing) {
   progress.classList.toggle('hidden', !analyzing);
   progress.setAttribute('aria-hidden', String(!analyzing));
   if (analyzing) {
-    const { title, detail } = smartProgressMessage();
-    $('#smart-progress-title').textContent = title;
-    $('#smart-progress-detail').textContent = detail;
+    const title = updateSmartProgress();
     setSmartFeedback(`${title}…`);
+    smartProgressTimers = [
+      setTimeout(() => setSmartFeedback(`${updateSmartProgress(1)}…`), 4500),
+      setTimeout(() => setSmartFeedback(`${updateSmartProgress(2)}…`), 12000),
+    ];
     if (moveFocusToCancel) $('#btn-smart-analyze').focus({ preventScroll: true });
   }
 }
@@ -909,28 +945,22 @@ function renderSmartReceipt() {
 
 function openReceiptPreview(source) {
   if (!source) return;
-  const view = $('#view-group');
-  const modal = $('#modal-expense');
+  const lightbox = $('#receipt-lightbox');
+  if (lightbox.open) return;
   receiptPreviewContext = {
     returnFocus: document.activeElement,
-    viewWasInert: view.inert,
-    modalWasInert: modal.inert,
   };
   $('#receipt-lightbox-image').src = source;
-  $('#receipt-lightbox').classList.remove('hidden');
-  view.inert = true;
-  modal.inert = true;
+  lightbox.showModal();
   document.body.classList.add('receipt-preview-open');
   $('#btn-close-receipt-lightbox').focus({ preventScroll: true });
 }
 
 function closeReceiptPreview() {
   const lightbox = $('#receipt-lightbox');
-  if (lightbox.classList.contains('hidden')) return;
-  lightbox.classList.add('hidden');
+  if (!lightbox.open) return;
+  lightbox.close();
   $('#receipt-lightbox-image').removeAttribute('src');
-  $('#view-group').inert = receiptPreviewContext?.viewWasInert ?? false;
-  $('#modal-expense').inert = receiptPreviewContext?.modalWasInert ?? false;
   document.body.classList.remove('receipt-preview-open');
   const returnFocus = receiptPreviewContext?.returnFocus;
   receiptPreviewContext = null;
@@ -938,8 +968,19 @@ function closeReceiptPreview() {
 }
 
 $('#btn-close-receipt-lightbox').addEventListener('click', closeReceiptPreview);
-$('#receipt-lightbox').addEventListener('click', (event) => {
-  if (event.target === event.currentTarget) closeReceiptPreview();
+$('#receipt-lightbox').addEventListener('pointerdown', (event) => {
+  receiptBackdropPointerDown = event.target === event.currentTarget;
+});
+$('#receipt-lightbox').addEventListener('pointerup', (event) => {
+  if (receiptBackdropPointerDown && event.target === event.currentTarget) closeReceiptPreview();
+  receiptBackdropPointerDown = false;
+});
+$('#receipt-lightbox').addEventListener('pointercancel', () => {
+  receiptBackdropPointerDown = false;
+});
+$('#receipt-lightbox').addEventListener('cancel', (event) => {
+  event.preventDefault();
+  closeReceiptPreview();
 });
 
 async function setSmartReceiptFile(file) {
@@ -1551,6 +1592,8 @@ let modalFocusTimer = null;
 let expenseRequestId = null;
 let receiptTask = null;
 let receiptSequence = 0;
+let expenseClosePending = false;
+let expenseBackdropPointerDown = false;
 
 function newRequestId() {
   if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
@@ -1776,31 +1819,49 @@ function openExpenseModal(expense = null) {
 
   const modal = $('#modal-expense');
   clearTimeout(modal._closeTimer);
-  modal.classList.remove('hidden', 'closing');
-  $('#view-group').inert = true;
+  modal.classList.remove('closing');
+  if (!modal.open) modal.showModal();
   document.body.classList.add('modal-open');
   $('#form-expense').scrollTop = 0;
   clearTimeout(modalFocusTimer);
   if (!expense || !matchMedia('(pointer: coarse)').matches) {
     modalFocusTimer = setTimeout(() => $('#exp-desc').focus(), 50);
+  } else {
+    modalFocusTimer = setTimeout(() => $('#btn-close-modal').focus({ preventScroll: true }), 50);
   }
 }
 
-function closeExpenseModal(force = false) {
-  if (expenseSubmitting && !force) return false;
-  if (!force && hasUnsavedExpenseChanges()
-    && !confirm('尚未儲存的變更會遺失，確定關閉？')) return false;
+async function closeExpenseModal(force = false) {
   const modal = $('#modal-expense');
+  if (!modal.open || modal.classList.contains('closing')) return true;
+  if (expenseSubmitting && !force) return false;
+  if (expenseClosePending && !force) return false;
+  if (!force) expenseClosePending = true;
+  try {
+    if (!force && hasUnsavedExpenseChanges()) {
+      const confirmed = await AppDialog.confirm({
+        title: '捨棄這次變更？',
+        message: '尚未儲存的修改會遺失，原本的帳目不會受到影響。',
+        confirmLabel: '捨棄變更',
+        tone: 'danger',
+      });
+      if (!confirmed) return false;
+    }
+    if (!modal.open || modal.classList.contains('closing')) return true;
+  } finally {
+    if (!force) expenseClosePending = false;
+  }
   receiptSequence += 1;
   receiptTask = null;
   clearTimeout(modalFocusTimer);
   modal.classList.add('closing');
   modal._closeTimer = setTimeout(() => {
-    modal.classList.add('hidden');
+    modal.close();
     modal.classList.remove('closing');
-    $('#view-group').inert = false;
     document.body.classList.remove('modal-open');
-    if (modalReturnFocus?.isConnected) modalReturnFocus.focus();
+    const returnFocus = modalReturnFocus;
+    modalReturnFocus = null;
+    if (returnFocus?.isConnected) returnFocus.focus();
   }, 180);
   state.editingId = null;
   state.editingVersion = null;
@@ -1826,7 +1887,26 @@ function renderReceiptUI() {
   syncAiReviewSummary();
 }
 
-// 縮到最長邊 1600px 的 JPEG，避免上傳原始大圖
+function canvasToJpegDataUrl(canvas) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (!blob) return reject(new Error('圖片轉換失敗，請改用其他圖片'));
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = typeof reader.result === 'string' ? reader.result : '';
+        if (!dataUrl.startsWith('data:image/jpeg;base64,')) {
+          reject(new Error('圖片轉換失敗，請改用其他圖片'));
+          return;
+        }
+        resolve(dataUrl);
+      };
+      reader.onerror = () => reject(new Error('圖片轉換失敗，請改用其他圖片'));
+      reader.readAsDataURL(blob);
+    }, 'image/jpeg', 0.82);
+  });
+}
+
+// 縮到最長邊 1600px；非同步編碼避免大型照片長時間卡住操作介面。
 function compressImage(file) {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
@@ -1846,11 +1926,7 @@ function compressImage(file) {
         context.fillStyle = '#fff';
         context.fillRect(0, 0, canvas.width, canvas.height);
         context.drawImage(img, 0, 0, canvas.width, canvas.height);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
-        if (!dataUrl.startsWith('data:image/jpeg;base64,')) {
-          throw new Error('圖片轉換失敗，請改用其他圖片');
-        }
-        resolve(dataUrl);
+        canvasToJpegDataUrl(canvas).then(resolve, reject);
       } catch (error) {
         reject(error);
       }
@@ -1915,7 +1991,12 @@ $('#btn-receipt-remove').addEventListener('click', () => {
 $('#btn-delete-expense').addEventListener('click', async () => {
   if (!state.editingId || expenseSubmitting) return;
   const exp = state.data.expenses.find((e) => e.id === state.editingId);
-  if (!confirm(`確定刪除「${exp?.description ?? '這筆支出'}」？`)) return;
+  if (!await AppDialog.confirm({
+    title: '刪除帳目',
+    message: `確定刪除「${exp?.description ?? '這筆支出'}」？刪除後可從管理面板的回收桶復原。`,
+    confirmLabel: '刪除',
+    tone: 'danger',
+  })) return;
   setExpenseSubmitting(true, '處理中…');
   try {
     await api(
@@ -2033,47 +2114,35 @@ $('#split-custom').addEventListener('click', () => setSplitMode('custom'));
 $('#split-none').addEventListener('click', () => setSplitMode('none'));
 
 $('#btn-add-expense').addEventListener('click', () => openExpenseModal());
-$('#btn-close-modal').addEventListener('click', () => closeExpenseModal());
-$('#modal-expense').addEventListener('click', (ev) => {
-  if (ev.target === ev.currentTarget) closeExpenseModal();
+$('#btn-close-modal').addEventListener('click', async () => closeExpenseModal());
+$('#modal-expense').addEventListener('pointerdown', (event) => {
+  expenseBackdropPointerDown = event.target === event.currentTarget;
+});
+$('#modal-expense').addEventListener('pointerup', async (event) => {
+  if (expenseBackdropPointerDown && event.target === event.currentTarget) {
+    await closeExpenseModal();
+  }
+  expenseBackdropPointerDown = false;
+});
+$('#modal-expense').addEventListener('pointercancel', () => {
+  expenseBackdropPointerDown = false;
+});
+$('#modal-expense').addEventListener('cancel', async (event) => {
+  event.preventDefault();
+  await closeExpenseModal();
 });
 document.addEventListener('keydown', (ev) => {
-  if (!$('#receipt-lightbox').classList.contains('hidden')) {
-    if (ev.key === 'Escape') closeReceiptPreview();
-    if (ev.key === 'Escape' || ev.key === 'Tab') ev.preventDefault();
-    if (ev.key === 'Tab') $('#btn-close-receipt-lightbox').focus();
-    return;
-  }
+  if ($('#receipt-lightbox').open || $('#app-dialog').open) return;
   const modal = $('#modal-expense');
-  if (modal.classList.contains('hidden') || modal.classList.contains('closing')) return;
+  if (!modal.open || modal.classList.contains('closing')) return;
   if ((ev.metaKey || ev.ctrlKey) && ev.key === 'Enter' && !expenseSubmitting) {
     ev.preventDefault();
     $('#form-expense').requestSubmit();
-    return;
-  }
-  if (ev.key === 'Escape') {
-    ev.preventDefault();
-    closeExpenseModal();
-    return;
-  }
-  if (ev.key !== 'Tab') return;
-  const focusable = [...modal.querySelectorAll(
-    'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled])'
-  )].filter((el) => !el.closest('.hidden'));
-  if (focusable.length === 0) return;
-  const first = focusable[0];
-  const last = focusable[focusable.length - 1];
-  if (ev.shiftKey && document.activeElement === first) {
-    ev.preventDefault();
-    last.focus();
-  } else if (!ev.shiftKey && document.activeElement === last) {
-    ev.preventDefault();
-    first.focus();
   }
 });
 
 window.addEventListener('beforeunload', (ev) => {
-  if ($('#modal-expense').classList.contains('hidden') || !hasUnsavedExpenseChanges()) return;
+  if (!$('#modal-expense').open || !hasUnsavedExpenseChanges()) return;
   ev.preventDefault();
   ev.returnValue = '';
 });
