@@ -82,10 +82,10 @@ OPENAI_API_KEY_FILE='/run/secrets/openai.json'
 
 JSON 檔案格式為 `{ "OPENAI_API_KEY": "..." }`；直接設定 `OPENAI_API_KEY` 時會優先使用環境變數。
 
-預設模型為 `gpt-5.6`，可以依部署需求調整：
+預設模型為 `gpt-5.6-sol`，可以依部署需求調整：
 
 ```bash
-OPENAI_MODEL='gpt-5.6' OPENAI_TIMEOUT_MS=30000 AI_REQUESTS_PER_HOUR=30 npm start
+OPENAI_MODEL='gpt-5.6-sol' OPENAI_TIMEOUT_MS=30000 AI_REQUESTS_PER_HOUR=30 npm start
 ```
 
 也可指定相容 Responses API 的自訂服務端點：
@@ -96,7 +96,7 @@ OPENAI_BASE_URL='https://provider.example' \
 OPENAI_MODEL='供應商模型名稱' npm start
 ```
 
-- `OPENAI_MODEL`：帳目辨識模型，預設 `gpt-5.6`
+- `OPENAI_MODEL`：帳目辨識模型，預設 `gpt-5.6-sol`
 - `OPENAI_BASE_URL`：選填的相容 Responses API 端點；未設定時使用 OpenAI 官方端點
 - `OPENAI_API_KEY_FILE`：選填的純文字或 JSON 金鑰檔案；`OPENAI_API_KEY` 未設定時使用
 - `OPENAI_TIMEOUT_MS`：單次 AI 請求逾時，預設 30 秒

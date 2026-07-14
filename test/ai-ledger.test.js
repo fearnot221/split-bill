@@ -632,14 +632,14 @@ test('explicit participants override inferred splits while preserving exact cust
 
 test('builds a private multimodal Responses API request', () => {
   const request = buildOpenAIRequest({
-    model: 'gpt-5.6',
+    model: 'gpt-5.6-sol',
     text: '單據請分析',
     receiptDataUrl: 'data:image/jpeg;base64,/9j/',
     context,
     today: '2026-07-14',
     safetyIdentifier: 'ledger_test',
   });
-  assert.equal(request.model, 'gpt-5.6');
+  assert.equal(request.model, 'gpt-5.6-sol');
   assert.equal(request.store, false);
   assert.equal(request.safety_identifier, 'ledger_test');
   assert.equal(request.max_output_tokens, 2000);
@@ -662,7 +662,7 @@ test('OpenAI instructions describe explicit participants by name without member 
     explicitParticipantIds: ['private-id-ming'],
   };
   const request = buildOpenAIRequest({
-    model: 'gpt-5.6',
+    model: 'gpt-5.6-sol',
     text: '晚餐 300',
     receiptDataUrl: null,
     context: privateContext,
@@ -711,7 +711,7 @@ test('parses and normalizes a structured OpenAI response', async () => {
   };
   const result = await analyzeWithOpenAI({
     client,
-    model: 'gpt-5.6',
+    model: 'gpt-5.6-sol',
     text: '車票88我跟小明',
     receiptDataUrl: null,
     context,
@@ -744,7 +744,7 @@ test('preserves token usage when an OpenAI response cannot be parsed', async () 
   await assert.rejects(
     analyzeWithOpenAI({
       client,
-      model: 'gpt-5.6',
+      model: 'gpt-5.6-sol',
       text: '晚餐 300',
       receiptDataUrl: null,
       context,

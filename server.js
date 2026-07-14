@@ -43,7 +43,7 @@ const APP_PASSWORD = process.env.APP_PASSWORD || '';
 const ALLOW_PUBLIC_ACCESS = process.env.ALLOW_PUBLIC_ACCESS === '1';
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY
   || readOpenAiApiKeyFile(process.env.OPENAI_API_KEY_FILE);
-const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-5.6';
+const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-5.6-sol';
 const OPENAI_TIMEOUT_MS = positiveIntegerEnv(process.env.OPENAI_TIMEOUT_MS, 30_000);
 const AI_REQUESTS_PER_HOUR = positiveIntegerEnv(process.env.AI_REQUESTS_PER_HOUR, 30);
 
