@@ -382,6 +382,37 @@ function getAiContext(groupId, preferredMemberId) {
   return { members, categories, defaultMemberId: defaultMember?.id || null };
 }
 
+function validateExplicitParticipantIds(value, context) {
+  if (value === undefined || value === null) return { participantIds: [] };
+  if (!Array.isArray(value)) return { error: '分帳對象格式不正確' };
+  if (value.length === 0) return { participantIds: [] };
+  const people = context.members.filter((member) => !member.is_fund);
+  if (value.length > people.length) return { error: '分帳對象數量不正確' };
+  const memberById = new Map(context.members.map((member) => [member.id, member]));
+  const selected = new Set();
+  for (const memberId of value) {
+    if (typeof memberId !== 'string' || !memberId) return { error: '分帳對象格式不正確' };
+    if (selected.has(memberId)) return { error: '同一分帳對象不能重複選擇' };
+    const member = memberById.get(memberId);
+    if (!member) return { error: '分帳對象不在帳本中' };
+    if (member.is_fund) return { error: '公帳不能作為一般分帳對象' };
+    selected.add(memberId);
+  }
+  return {
+    participantIds: people.filter((member) => selected.has(member.id)).map((member) => member.id),
+  };
+}
+
+function explicitParticipantNotice(context, draft) {
+  const selected = new Set(context.explicitParticipantIds || []);
+  if (!selected.size) return null;
+  if (draft.kind === 'transfer') return '這筆為轉帳，未套用預選分帳對象';
+  const names = context.members
+    .filter((member) => selected.has(member.id))
+    .map((member) => member.name);
+  return `已套用分帳對象：${names.join('、')}`;
+}
+
 const aiUsage = new Map();
 function consumeAiQuota(ip) {
   const now = Date.now();
@@ -443,8 +474,10 @@ app.get('/api/ai/status', (req, res) => {
 function buildLocalAnalysis({ text, receiptDataUrl, context, today, notice }) {
   const raw = localParse(text, { ...context, today, hasReceipt: !!receiptDataUrl });
   const draft = normalizeDraft(raw, { ...context, today, sourceText: text });
-  const notices = [notice];
+  const notices = [notice].filter(Boolean);
   if (receiptDataUrl) notices.push('這次未辨識單據內容，圖片仍會隨帳目保存');
+  const participantNotice = explicitParticipantNotice(context, draft);
+  if (participantNotice) notices.push(participantNotice);
   return { provider: 'local', model: null, draft, notices };
 }
 
@@ -465,6 +498,9 @@ app.post('/api/groups/:id/ai/parse', async (req, res) => {
 
   const context = getAiContext(req.params.id, body.defaultMemberId);
   if (!context) return res.status(404).json({ error: '找不到帳本' });
+  const explicitParticipants = validateExplicitParticipantIds(body.participantIds, context);
+  if (explicitParticipants.error) return res.status(400).json({ error: explicitParticipants.error });
+  context.explicitParticipantIds = explicitParticipants.participantIds;
   const today = isValidDate(body.localDate) ? body.localDate : todayInTaipei();
   const startedAt = Date.now();
 
@@ -512,8 +548,12 @@ app.post('/api/groups/:id/ai/parse', async (req, res) => {
       provider: 'openai', model: OPENAI_MODEL, hasReceipt: !!receiptDataUrl,
       success: true, startedAt, usage: result.usage,
     });
+    const participantNotice = explicitParticipantNotice(context, result.draft);
     return res.json({
-      provider: 'openai', model: OPENAI_MODEL, draft: result.draft, notices: [],
+      provider: 'openai',
+      model: OPENAI_MODEL,
+      draft: result.draft,
+      notices: participantNotice ? [participantNotice] : [],
     });
   } catch (error) {
     const cancelled = clientAbort.controller.signal.aborted;

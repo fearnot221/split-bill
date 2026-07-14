@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#f5f3ee" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#191813" media="(prefers-color-scheme: dark)">
   <title>分帳小工具 — 記帳分帳</title>
-  <link rel="stylesheet" href="style.css?v=29">
+  <link rel="stylesheet" href="style.css?v=30">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%2344705a'/><text x='50' y='72' font-size='60' text-anchor='middle' fill='white' font-family='Helvetica,Arial,sans-serif' font-weight='bold'>$</text></svg>">
 </head>
 <body>
@@ -47,8 +47,17 @@
             <span id="smart-mode" class="smart-mode">準備中</span>
           </div>
           <label class="visually-hidden" for="smart-input">記帳內容</label>
-          <textarea id="smart-input" class="smart-input" rows="3" maxlength="2000" enterkeyhint="send"
-            placeholder="例如：昨天晚餐 1,280，我付的，我跟小明、小美均分"></textarea>
+          <div id="smart-input-wrap" class="smart-input-wrap" aria-busy="false">
+            <textarea id="smart-input" class="smart-input" rows="3" maxlength="2000" enterkeyhint="send"
+              placeholder="例如：昨天晚餐 1,280，我付的，我跟小明、小美均分"></textarea>
+            <div id="smart-progress" class="smart-progress hidden" aria-hidden="true">
+              <span class="smart-progress-spinner"></span>
+              <span class="smart-progress-copy">
+                <strong id="smart-progress-title">正在理解分帳內容</strong>
+                <span id="smart-progress-detail">整理金額、付款人與分帳對象</span>
+              </span>
+            </div>
+          </div>
           <div id="smart-receipt" class="smart-receipt hidden">
             <button type="button" id="btn-smart-receipt-view" class="receipt-preview"
               aria-label="查看待分析單據" title="查看單據">
@@ -58,6 +67,14 @@
             <button type="button" id="btn-smart-receipt-remove" class="icon-btn" aria-label="移除單據">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
             </button>
+          </div>
+          <div id="smart-participants" class="smart-participants">
+            <div class="smart-participants-head">
+              <span id="smart-participants-label">分帳對象 <small>選填</small></span>
+              <button type="button" id="btn-smart-participants-clear" class="pill-btn hidden">清除</button>
+            </div>
+            <div id="smart-participant-list" class="smart-participant-list"
+              role="group" aria-labelledby="smart-participants-label"></div>
           </div>
           <div class="smart-actions">
             <input type="file" id="smart-receipt-file" accept="image/*" class="hidden">
@@ -75,11 +92,12 @@
               <span>相簿</span>
             </button>
             <button type="button" id="btn-smart-analyze" class="btn btn-primary btn-sm" disabled>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3-1.4 3.6L7 8l3.6 1.4L12 13l1.4-3.6L17 8l-3.6-1.4Z"/><path d="m19 14-.8 2.2L16 17l2.2.8L19 20l.8-2.2L22 17l-2.2-.8Z"/><path d="m5 14-.8 2.2L2 17l2.2.8L5 20l.8-2.2L8 17l-2.2-.8Z"/></svg>
+              <svg class="analyze-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3-1.4 3.6L7 8l3.6 1.4L12 13l1.4-3.6L17 8l-3.6-1.4Z"/><path d="m19 14-.8 2.2L16 17l2.2.8L19 20l.8-2.2L22 17l-2.2-.8Z"/><path d="m5 14-.8 2.2L2 17l2.2.8L5 20l.8-2.2L8 17l-2.2-.8Z"/></svg>
+              <svg class="cancel-icon hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
               <span>分析帳目</span>
             </button>
           </div>
-          <p id="smart-feedback" class="smart-feedback" role="status" aria-live="polite"></p>
+          <p id="smart-feedback" class="smart-feedback" role="status" aria-live="polite" aria-atomic="true"></p>
           <div id="smart-recents" class="smart-recents hidden">
             <span>最近</span>
             <div id="smart-recent-list"></div>
@@ -279,6 +297,6 @@
 
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
-  <script src="app.js?v=49"></script>
+  <script src="app.js?v=50"></script>
 </body>
 </html>

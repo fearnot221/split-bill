@@ -87,6 +87,7 @@ test('falls back to an editable local draft when OpenAI is unavailable', async (
       text: '晚餐500我付不分攤',
       receiptDataUrl: `data:image/jpeg;base64,${receipt}`,
       defaultMemberId: me.memberId,
+      participantIds: [me.memberId],
       localDate: '2026-07-14',
       safetySessionId,
     }),
@@ -97,7 +98,10 @@ test('falls back to an editable local draft when OpenAI is unavailable', async (
   assert.equal(body.provider, 'local');
   assert.equal(body.draft.ready, true);
   assert.equal(body.draft.amount, 500);
+  assert.deepEqual(body.draft.participantIds, [me.memberId]);
+  assert.equal(body.draft.splitMode, 'equal');
   assert.match(body.notices.join(' '), /已改用基本文字規則/);
+  assert.match(body.notices.join(' '), /已套用分帳對象/);
   assert.match(body.notices.join(' '), /未辨識單據內容/);
   assert.doesNotMatch(body.draft.warnings.join(' '), /尚未設定 AI/);
   assert.ok(upstreamRequests >= 1);

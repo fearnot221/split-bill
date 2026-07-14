@@ -67,6 +67,7 @@ let smartAnalyzeController = null;
 let smartReceiptTask = null;
 let smartReceiptSequence = 0;
 let cachedSafetySessionId = null;
+let smartParticipantIds = new Set();
 let smartInputComposing = false;
 let smartInputCompositionJustEnded = false;
 let receiptPreviewContext = null;
@@ -302,6 +303,7 @@ function renderAll() {
   renderSettlements(settlements);
   renderStats();
   renderSmartRecents(expenses);
+  renderSmartParticipants(members);
 }
 
 /* ===== 支出列表（含搜尋 / 分類篩選） ===== */
@@ -733,6 +735,64 @@ $('#btn-clear-filters').addEventListener('click', () => {
 });
 
 /* ===== 一句記帳 ===== */
+function selectedSmartParticipantIds() {
+  const people = state.data?.members?.filter((member) => !member.is_fund) || [];
+  const validIds = new Set(people.map((member) => member.id));
+  smartParticipantIds = new Set(
+    [...smartParticipantIds].filter((memberId) => validIds.has(memberId))
+  );
+  return people.filter((member) => smartParticipantIds.has(member.id)).map((member) => member.id);
+}
+
+function syncSmartParticipantControls() {
+  const selectedIds = new Set(selectedSmartParticipantIds());
+  $$('#smart-participant-list .smart-participant').forEach((button) => {
+    const active = selectedIds.has(button.dataset.id);
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', String(active));
+    button.disabled = smartAnalyzing;
+  });
+  const clear = $('#btn-smart-participants-clear');
+  clear.classList.toggle('hidden', selectedIds.size === 0);
+  clear.disabled = smartAnalyzing;
+}
+
+function renderSmartParticipants(members = state.data?.members || []) {
+  const people = members.filter((member) => !member.is_fund);
+  const container = $('#smart-participants');
+  container.classList.toggle('hidden', people.length === 0);
+  const list = $('#smart-participant-list');
+  const signature = JSON.stringify(people.map((member) => [member.id, member.name]));
+  if (list.dataset.signature !== signature) {
+    list.dataset.signature = signature;
+    list.innerHTML = people.map((member) => `
+      <button type="button" class="smart-participant" data-id="${member.id}"
+        aria-label="選擇與 ${escapeHtml(member.name)} 分帳" aria-pressed="false">
+        ${escapeHtml(member.name)}
+      </button>
+    `).join('');
+  }
+  syncSmartParticipantControls();
+}
+
+function smartProgressMessage() {
+  const hasText = !!$('#smart-input').value.trim();
+  const hasReceipt = !!smartReceiptDataUrl;
+  const selectedCount = selectedSmartParticipantIds().length;
+  const title = hasText && hasReceipt
+    ? '正在比對單據與分帳內容'
+    : hasReceipt ? '正在讀取單據' : '正在理解分帳內容';
+  let detail = hasReceipt && !hasText
+    ? '辨識店家、日期與金額'
+    : '整理金額、付款人與分帳對象';
+  if (selectedCount) {
+    detail = hasReceipt && !hasText
+      ? `辨識帳目並套用已選的 ${selectedCount} 位成員`
+      : `整理帳目並套用已選的 ${selectedCount} 位成員`;
+  }
+  return { title, detail };
+}
+
 function setSmartFeedback(message, error = false) {
   const feedback = $('#smart-feedback');
   feedback.textContent = message;
@@ -755,22 +815,36 @@ function resizeSmartInput() {
 }
 
 function setSmartAnalyzing(analyzing) {
+  const moveFocusToCancel = analyzing && document.activeElement === $('#smart-input');
   smartAnalyzing = analyzing;
   if (analyzing && smartSpeechRecognition
     && $('#btn-smart-voice').getAttribute('aria-pressed') === 'true') {
     smartSpeechRecognition.abort();
   }
-  $('#smart-entry-title').closest('.smart-entry').setAttribute('aria-busy', String(analyzing));
+  $('#smart-input-wrap').setAttribute('aria-busy', String(analyzing));
   $('#smart-input').disabled = analyzing;
   $('#btn-smart-receipt').disabled = analyzing;
   $('#btn-smart-camera').disabled = analyzing;
   $('#btn-smart-voice').disabled = analyzing;
   $('#btn-smart-receipt-remove').disabled = analyzing;
+  syncSmartParticipantControls();
   syncSmartAnalyzeButton();
   const label = $('#btn-smart-analyze span');
   label.textContent = analyzing ? '取消分析' : smartReceiptTask ? '處理單據…' : '分析帳目';
   $('#btn-smart-analyze').classList.toggle('analyzing', analyzing);
-  if (analyzing) setSmartFeedback('正在整理金額、成員與分攤方式…');
+  $('#btn-smart-analyze .analyze-icon').classList.toggle('hidden', analyzing);
+  $('#btn-smart-analyze .cancel-icon').classList.toggle('hidden', !analyzing);
+  $('#btn-smart-analyze').title = analyzing ? '取消分析' : '分析帳目';
+  const progress = $('#smart-progress');
+  progress.classList.toggle('hidden', !analyzing);
+  progress.setAttribute('aria-hidden', String(!analyzing));
+  if (analyzing) {
+    const { title, detail } = smartProgressMessage();
+    $('#smart-progress-title').textContent = title;
+    $('#smart-progress-detail').textContent = detail;
+    setSmartFeedback(`${title}…`);
+    if (moveFocusToCancel) $('#btn-smart-analyze').focus({ preventScroll: true });
+  }
 }
 
 function renderSmartReceipt() {
@@ -871,9 +945,11 @@ function clearSmartEntry() {
   smartReceiptName = '';
   smartReceiptSequence += 1;
   smartReceiptTask = null;
+  smartParticipantIds.clear();
   aiDraftActive = false;
   aiDraftConsumesSmartEntry = false;
   renderSmartReceipt();
+  syncSmartParticipantControls();
   syncSmartAnalyzeButton();
   clearTimeout(smartPersistTimer);
   deleteSmartDraft().catch(() => {});
@@ -907,6 +983,7 @@ async function writeSmartDraft() {
       text,
       receiptDataUrl: smartReceiptDataUrl,
       receiptName: smartReceiptName,
+      participantIds: selectedSmartParticipantIds(),
       updatedAt: new Date().toISOString(),
     }, state.groupId);
     transaction.oncomplete = resolve;
@@ -951,7 +1028,9 @@ async function restoreSmartDraft() {
     resizeSmartInput();
     smartReceiptDataUrl = typeof draft.receiptDataUrl === 'string' ? draft.receiptDataUrl : null;
     smartReceiptName = typeof draft.receiptName === 'string' ? draft.receiptName : '';
+    smartParticipantIds = new Set(Array.isArray(draft.participantIds) ? draft.participantIds : []);
     renderSmartReceipt();
+    syncSmartParticipantControls();
     syncSmartAnalyzeButton();
     setSmartFeedback('已復原尚未儲存的記帳草稿');
   } catch {}
@@ -1054,6 +1133,23 @@ function buildRepeatDraft(expense) {
   };
 }
 
+function applySmartParticipantSelection(draft) {
+  const participantIds = selectedSmartParticipantIds();
+  if (!participantIds.length || draft.kind === 'transfer') return draft;
+  const selected = new Set(participantIds);
+  const customIds = new Set((draft.customSplits || []).map((split) => split.memberId));
+  const keepCustom = draft.splitMode === 'custom'
+    && customIds.size === selected.size
+    && participantIds.every((memberId) => customIds.has(memberId));
+  return {
+    ...draft,
+    participantIds,
+    participantNames: participantIds.map(memberName),
+    splitMode: keepCustom ? 'custom' : 'equal',
+    customSplits: keepCustom ? draft.customSplits : [],
+  };
+}
+
 function renderSmartRecents(expenses) {
   const recent = [];
   const seen = new Set();
@@ -1081,7 +1177,12 @@ $('#smart-recent-list').addEventListener('click', (ev) => {
   if (!button) return;
   const expense = state.data?.expenses.find((item) => item.id === button.dataset.id);
   if (!expense) return;
-  applyAiDraft({ provider: 'recent', model: null, draft: buildRepeatDraft(expense), notices: [] });
+  applyAiDraft({
+    provider: 'recent',
+    model: null,
+    draft: applySmartParticipantSelection(buildRepeatDraft(expense)),
+    notices: [],
+  });
   setSmartFeedback('已帶入最近紀錄，請確認後儲存');
 });
 
@@ -1208,6 +1309,7 @@ async function analyzeSmartEntry() {
     smartAnalyzeController?.abort();
     return;
   }
+  const returnFocus = document.activeElement;
   if (smartReceiptTask) {
     setSmartFeedback('正在準備單據圖片…');
     try {
@@ -1224,6 +1326,8 @@ async function analyzeSmartEntry() {
     return;
   }
   smartAnalyzeController = new AbortController();
+  const participantIds = selectedSmartParticipantIds();
+  let cancelled = false;
   setSmartAnalyzing(true);
   try {
     const result = await api(`/api/groups/${state.groupId}/ai/parse`, {
@@ -1235,6 +1339,7 @@ async function analyzeSmartEntry() {
         defaultMemberId: state.memberId,
         localDate: todayLocal(),
         safetySessionId: safetySessionId(),
+        ...(participantIds.length ? { participantIds } : {}),
       }),
     });
     if (!result.draft?.isLedgerEntry) {
@@ -1244,10 +1349,12 @@ async function analyzeSmartEntry() {
     }
     applyAiDraft(result);
   } catch (error) {
+    cancelled = !!error.cancelled;
     setSmartFeedback(error.message, !error.cancelled);
   } finally {
     smartAnalyzeController = null;
     setSmartAnalyzing(false);
+    if (cancelled && returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
   }
 }
 
@@ -1277,6 +1384,21 @@ $('#btn-smart-receipt-view').addEventListener('click', () => {
   openReceiptPreview(smartReceiptDataUrl);
 });
 $('#btn-smart-analyze').addEventListener('click', analyzeSmartEntry);
+$('#smart-participant-list').addEventListener('click', (ev) => {
+  const button = ev.target.closest('.smart-participant');
+  if (!button || smartAnalyzing) return;
+  if (smartParticipantIds.has(button.dataset.id)) smartParticipantIds.delete(button.dataset.id);
+  else smartParticipantIds.add(button.dataset.id);
+  syncSmartParticipantControls();
+  scheduleSmartDraftPersist();
+});
+$('#btn-smart-participants-clear').addEventListener('click', () => {
+  if (smartAnalyzing) return;
+  smartParticipantIds.clear();
+  syncSmartParticipantControls();
+  scheduleSmartDraftPersist();
+  $('#smart-participant-list .smart-participant')?.focus({ preventScroll: true });
+});
 $('#smart-input').addEventListener('compositionstart', () => {
   smartInputComposing = true;
   smartInputCompositionJustEnded = false;

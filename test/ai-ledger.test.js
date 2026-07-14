@@ -558,6 +558,78 @@ test('normalizer rejects unknown members and unsafe custom totals', () => {
   assert.match(incomplete.warnings.join(' '), /分類/);
 });
 
+test('explicit participants override inferred splits while preserving exact custom splits', () => {
+  const selectedContext = {
+    ...context,
+    today: '2026-07-14',
+    explicitParticipantIds: ['ming'],
+  };
+  const inferredText = '晚餐 300，我跟小明均分，我付';
+  const inferred = normalizeDraft(
+    localParse(inferredText, { ...selectedContext, hasReceipt: false }),
+    { ...selectedContext, sourceText: inferredText }
+  );
+  assert.equal(inferred.splitMode, 'equal');
+  assert.deepEqual(inferred.participantIds, ['ming']);
+
+  const exactCustom = normalizeDraft({
+    isLedgerEntry: true,
+    kind: 'expense',
+    description: '晚餐',
+    amount: 300,
+    category: '餐飲',
+    expenseDate: '2026-07-14',
+    payerName: '我',
+    participantNames: ['小明'],
+    splitMode: 'custom',
+    customSplits: [{ memberName: '小明', amount: 300 }],
+    transferToName: null,
+    note: null,
+    confidence: 0.9,
+    warnings: [],
+  }, { ...selectedContext, sourceText: '晚餐 300，小明 300' });
+  assert.equal(exactCustom.splitMode, 'custom');
+  assert.deepEqual(exactCustom.participantIds, ['ming']);
+  assert.deepEqual(exactCustom.customSplits, [
+    { memberId: 'ming', memberName: '小明', amount: 300 },
+  ]);
+
+  const mismatchedCustom = normalizeDraft({
+    isLedgerEntry: true,
+    kind: 'expense',
+    description: '晚餐',
+    amount: 300,
+    category: '餐飲',
+    expenseDate: '2026-07-14',
+    payerName: '我',
+    participantNames: ['我', '小明'],
+    splitMode: 'custom',
+    customSplits: [
+      { memberName: '我', amount: 200 },
+      { memberName: '小明', amount: 100 },
+    ],
+    transferToName: null,
+    note: null,
+    confidence: 0.9,
+    warnings: [],
+  }, { ...selectedContext, sourceText: '晚餐 300，我 200、小明 100' });
+  assert.equal(mismatchedCustom.splitMode, 'equal');
+  assert.deepEqual(mismatchedCustom.participantIds, ['ming']);
+  assert.deepEqual(mismatchedCustom.customSplits, []);
+  assert.match(mismatchedCustom.warnings.join(' '), /手動選擇的分帳對象不一致/);
+
+  const transferText = '我轉帳 500 給小明';
+  const transfer = normalizeDraft(
+    localParse(transferText, { ...selectedContext, hasReceipt: false }),
+    { ...selectedContext, sourceText: transferText }
+  );
+  assert.equal(transfer.kind, 'transfer');
+  assert.equal(transfer.payerId, 'me');
+  assert.equal(transfer.transferToId, 'ming');
+  assert.equal(transfer.splitMode, 'none');
+  assert.deepEqual(transfer.participantIds, []);
+});
+
 test('builds a private multimodal Responses API request', () => {
   const request = buildOpenAIRequest({
     model: 'gpt-5.6',
@@ -576,6 +648,31 @@ test('builds a private multimodal Responses API request', () => {
   assert.equal(request.input[0].content[1].detail, 'high');
   assert.equal(request.text.format.type, 'json_schema');
   assert.equal(request.text.format.strict, true);
+});
+
+test('OpenAI instructions describe explicit participants by name without member IDs', () => {
+  const privateContext = {
+    ...context,
+    members: [
+      { id: 'private-id-owner', name: '我', is_fund: 0 },
+      { id: 'private-id-ming', name: '小明', is_fund: 0 },
+      { id: 'private-id-fund', name: '公帳', is_fund: 1 },
+    ],
+    defaultMemberId: 'private-id-owner',
+    explicitParticipantIds: ['private-id-ming'],
+  };
+  const request = buildOpenAIRequest({
+    model: 'gpt-5.6',
+    text: '晚餐 300',
+    receiptDataUrl: null,
+    context: privateContext,
+    today: '2026-07-14',
+    safetyIdentifier: 'ledger_test',
+  });
+  assert.match(request.instructions, /明確指定分帳對象：\["小明"\]/);
+  for (const member of privateContext.members) {
+    assert.equal(request.instructions.includes(member.id), false, member.id);
+  }
 });
 
 test('parses and normalizes a structured OpenAI response', async () => {

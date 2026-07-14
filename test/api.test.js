@@ -168,6 +168,54 @@ test('API protects access, validates money, and rejects stale updates', async (t
     assert.match(fakeReceipt.body.error, /格式不符/);
   });
 
+  await t.test('uses optional explicit split participants and validates them', async () => {
+    const text = '晚餐 600，我跟小明均分，我付';
+    const explicit = await request(`/api/groups/${groupId}/ai/parse`, {
+      method: 'POST',
+      body: {
+        text,
+        defaultMemberId: payerId,
+        localDate: '2026-07-14',
+        participantIds: [memberId],
+      },
+    });
+    assert.equal(explicit.response.status, 200);
+    assert.deepEqual(explicit.body.draft.participantIds, [memberId]);
+    assert.equal(explicit.body.draft.splitMode, 'equal');
+    assert.match(explicit.body.notices.join(' '), /已套用分帳對象.*小明/);
+
+    const inferred = await request(`/api/groups/${groupId}/ai/parse`, {
+      method: 'POST',
+      body: {
+        text,
+        defaultMemberId: payerId,
+        localDate: '2026-07-14',
+        participantIds: [],
+      },
+    });
+    assert.equal(inferred.response.status, 200);
+    assert.deepEqual(new Set(inferred.body.draft.participantIds), new Set([payerId, memberId]));
+    assert.doesNotMatch(inferred.body.notices.join(' '), /已套用分帳對象/);
+
+    const ledger = await request(`/api/groups/${groupId}`);
+    const fundId = ledger.body.members.find((member) => member.is_fund)?.id;
+    assert.ok(fundId);
+    const invalidSelections = [
+      { value: memberId, message: /格式/ },
+      { value: [memberId, memberId], message: /重複/ },
+      { value: ['not-a-member'], message: /不在帳本/ },
+      { value: [fundId], message: /公帳/ },
+    ];
+    for (const { value, message } of invalidSelections) {
+      const invalid = await request(`/api/groups/${groupId}/ai/parse`, {
+        method: 'POST',
+        body: { text, participantIds: value },
+      });
+      assert.equal(invalid.response.status, 400);
+      assert.match(invalid.body.error, message);
+    }
+  });
+
   await t.test('rejects fractional cents, duplicate members, and invalid dates', async () => {
     const base = {
       payerId,
