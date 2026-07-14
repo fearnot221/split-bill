@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#f5f3ee" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#191813" media="(prefers-color-scheme: dark)">
   <title>分帳小工具 — 記帳分帳</title>
-  <link rel="stylesheet" href="style.css?v=30">
+  <link rel="stylesheet" href="style.css?v=31">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%2344705a'/><text x='50' y='72' font-size='60' text-anchor='middle' fill='white' font-family='Helvetica,Arial,sans-serif' font-weight='bold'>$</text></svg>">
 </head>
 <body>
@@ -22,7 +22,7 @@
         <span id="connection-message">無法連線到帳本</span>
         <button type="button" id="btn-retry" class="pill-btn">重試</button>
       </div>
-      <div class="stat-strip">
+      <div id="ledger-summary" class="stat-strip hidden">
         <div class="stat">
           <span class="stat-label">總支出</span>
           <span class="stat-value" id="total-amount">NT$0</span>
@@ -39,8 +39,8 @@
     </div>
 
     <main class="container">
-      <!-- 支出列表 -->
-      <section id="tab-expenses" class="tab-panel">
+      <!-- 快速記帳 -->
+      <section id="tab-entry" class="tab-panel entry-panel">
         <section class="smart-entry" aria-labelledby="smart-entry-title">
           <div class="smart-entry-head">
             <h2 id="smart-entry-title">一句記帳</h2>
@@ -104,6 +104,10 @@
           </div>
           <p class="smart-privacy">啟用 AI 時，這次輸入的文字與單據會傳送至設定的 AI 服務供應商。</p>
         </section>
+      </section>
+
+      <!-- 支出列表 -->
+      <section id="tab-expenses" class="tab-panel hidden">
         <div class="filter-bar">
           <div class="filter-search-row">
             <label class="visually-hidden" for="filter-text">搜尋紀錄</label>
@@ -194,20 +198,24 @@
 
     </main>
 
-    <button id="btn-add-expense" class="fab" aria-label="手動新增紀錄" title="手動新增">
+    <button id="btn-add-expense" class="fab hidden" aria-label="手動新增紀錄" title="手動新增">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
     </button>
 
     <nav class="tab-bar" aria-label="主要分頁">
-      <button class="tab-btn active" data-tab="expenses" aria-current="page">
+      <button class="tab-btn active" data-tab="entry" aria-current="page" aria-controls="tab-entry">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"/></svg>
+        <span>記帳</span>
+      </button>
+      <button class="tab-btn" data-tab="expenses" aria-controls="tab-expenses">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z"/><path d="M16 8h-6"/><path d="M16 12H8"/></svg>
         <span>明細</span>
       </button>
-      <button class="tab-btn" data-tab="settle">
+      <button class="tab-btn" data-tab="settle" aria-controls="tab-settle">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="M7 21h10"/><path d="M12 3v18"/><path d="M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2"/></svg>
         <span>結算</span>
       </button>
-      <button class="tab-btn" data-tab="stats">
+      <button class="tab-btn" data-tab="stats" aria-controls="tab-stats">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg>
         <span>統計</span>
       </button>
@@ -297,6 +305,6 @@
 
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
-  <script src="app.js?v=50"></script>
+  <script src="app.js?v=51"></script>
 </body>
 </html>

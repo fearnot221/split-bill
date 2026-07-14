@@ -665,28 +665,73 @@ function renderModalCats(selected) {
 }
 
 /* ===== 分頁切換 ===== */
-$$('.tab-btn').forEach((btn) => {
-  btn.addEventListener('click', () => {
-    $$('.tab-btn').forEach((b) => {
-      const active = b === btn;
-      b.classList.toggle('active', active);
-      if (active) b.setAttribute('aria-current', 'page');
-      else b.removeAttribute('aria-current');
+const tabScrollPositions = new Map();
+const validTabs = new Set([...$$('.tab-btn')].map((button) => button.dataset.tab));
+
+function tabFromLocation() {
+  const tab = window.location.hash.slice(1);
+  return validTabs.has(tab) ? tab : 'entry';
+}
+
+function updateTabLocation(tab, mode) {
+  const url = new URL(window.location.href);
+  url.hash = tab;
+  const nextState = { ...(window.history.state || {}), tab };
+  window.history[mode === 'push' ? 'pushState' : 'replaceState'](nextState, '', url);
+}
+
+function activateTab(tab, { animate = true, restoreScroll = true, locationMode = 'none' } = {}) {
+  const button = $(`.tab-btn[data-tab="${tab}"]`);
+  const panel = $(`#tab-${tab}`);
+  if (!button || !panel) return;
+  const previousTab = $('.tab-btn.active')?.dataset.tab;
+  const previousPanel = previousTab ? $(`#tab-${previousTab}`) : null;
+  const previousFocus = previousPanel?.contains(document.activeElement) ? document.activeElement : null;
+  const changed = !button.classList.contains('active');
+  if (changed && previousTab) tabScrollPositions.set(previousTab, window.scrollY);
+
+  $$('.tab-btn').forEach((item) => {
+    const active = item === button;
+    item.classList.toggle('active', active);
+    if (active) item.setAttribute('aria-current', 'page');
+    else item.removeAttribute('aria-current');
+  });
+  $$('.tab-panel').forEach((item) => item.classList.toggle('hidden', item !== panel));
+  document.body.dataset.activeTab = tab;
+  $('#ledger-summary').classList.toggle('hidden', tab === 'entry');
+  $('#btn-add-expense').classList.toggle('hidden', tab !== 'expenses');
+  if (changed && previousFocus) {
+    previousFocus.blur();
+    button.focus({ preventScroll: true });
+  }
+
+  if (animate && changed) {
+    panel.style.animation = 'none';
+    void panel.offsetHeight;
+    panel.style.animation = '';
+  }
+  if (restoreScroll && changed) {
+    requestAnimationFrame(() => {
+      window.scrollTo({ top: tabScrollPositions.get(tab) || 0, left: 0, behavior: 'auto' });
     });
-    const tab = btn.dataset.tab;
-    $$('.tab-panel').forEach((p) => {
-      const show = p.id === `tab-${tab}`;
-      p.classList.toggle('hidden', !show);
-      if (show) { // 重新觸發過場動畫
-        p.style.animation = 'none';
-        void p.offsetHeight;
-        p.style.animation = '';
-      }
-    });
-    $('#btn-add-expense').classList.toggle('hidden', tab !== 'expenses');
-    if (tab === 'stats') replayStatsBars();
+  }
+  if (tab === 'stats') replayStatsBars();
+  if (locationMode === 'replace' || (locationMode === 'push' && changed)) {
+    updateTabLocation(tab, locationMode);
+  }
+}
+
+$$('.tab-btn').forEach((button) => {
+  button.addEventListener('click', () => {
+    activateTab(button.dataset.tab, { locationMode: 'push' });
   });
 });
+activateTab(tabFromLocation(), {
+  animate: false,
+  restoreScroll: false,
+  locationMode: 'replace',
+});
+window.addEventListener('popstate', () => activateTab(tabFromLocation()));
 
 /* ===== 搜尋 / 篩選 ===== */
 $('#btn-toggle-filters').addEventListener('click', () => {
@@ -827,6 +872,9 @@ function setSmartAnalyzing(analyzing) {
   $('#btn-smart-camera').disabled = analyzing;
   $('#btn-smart-voice').disabled = analyzing;
   $('#btn-smart-receipt-remove').disabled = analyzing;
+  $$('.tab-btn').forEach((button) => {
+    button.disabled = analyzing && button.dataset.tab !== 'entry';
+  });
   syncSmartParticipantControls();
   syncSmartAnalyzeButton();
   const label = $('#btn-smart-analyze span');
