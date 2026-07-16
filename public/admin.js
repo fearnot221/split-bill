@@ -48,6 +48,12 @@ function toast(msg) {
   el._t = setTimeout(() => el.classList.add('hidden'), 2200);
 }
 
+function validateForm(form) {
+  return AppForm.validate(form, { notify: toast });
+}
+
+$$('form[data-app-form]').forEach((form) => AppForm.bind(form));
+
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -83,10 +89,11 @@ function showAuth(mode) {
 
 $('#form-auth').addEventListener('submit', async (ev) => {
   ev.preventDefault();
+  if (!validateForm(ev.currentTarget)) return;
   const mode = ev.target.dataset.mode;
   const password = $('#auth-password').value;
   if (mode === 'setup' && password !== $('#auth-confirm').value) {
-    return toast('兩次輸入的密碼不一致');
+    return AppForm.invalidate($('#auth-confirm'), '兩次輸入的密碼不一致', { notify: toast });
   }
   try {
     await api(`/api/admin/${mode === 'setup' ? 'setup' : 'login'}`, {
@@ -161,9 +168,12 @@ async function reloadPanel(successMessage) {
 function renderMembers() {
   $('#admin-members').innerHTML = overview.members.map((m) => {
     const records = m.paid_count + m.split_count;
-    const delDisabled = m.is_fund
-      ? 'disabled title="公帳為系統帳戶，無法刪除"'
-      : records > 0 ? 'disabled title="有帳務紀錄，無法刪除"' : '';
+    const deleteReason = m.is_fund
+      ? '公帳為系統帳戶，無法刪除'
+      : records > 0 ? '有帳務紀錄，無法刪除' : '';
+    const deleteState = deleteReason
+      ? `aria-disabled="true" aria-label="刪除：${escapeHtml(deleteReason)}" data-disabled-reason="${escapeHtml(deleteReason)}"`
+      : '';
     return `
       <li data-id="${m.id}">
         <span class="member-name-row">
@@ -173,7 +183,7 @@ function renderMembers() {
         </span>
         <span class="admin-actions">
           <button type="button" class="pill-btn act-rename">改名</button>
-          <button type="button" class="pill-btn danger act-del" ${delDisabled}>刪除</button>
+          <button type="button" class="pill-btn danger act-del" ${deleteState}>刪除</button>
         </span>
       </li>`;
   }).join('');
@@ -202,6 +212,7 @@ function renderMembers() {
 
   $$('#admin-members .act-del').forEach((btn) => {
     btn.addEventListener('click', async () => {
+      if (btn.dataset.disabledReason) return toast(btn.dataset.disabledReason);
       const li = btn.closest('li');
       const member = overview.members.find((m) => m.id === li.dataset.id);
       if (!await AppDialog.confirm({
@@ -219,20 +230,28 @@ function renderMembers() {
 }
 
 function renderCats() {
-  $('#admin-cats').innerHTML = overview.categories.map((c) => `
-    <li data-id="${c.id}">
-      <span class="member-name-row">
-        ${escapeHtml(c.name)}
-        <span class="member-tag">${c.used_count} 筆支出</span>
-      </span>
-      <span class="admin-actions">
-        <button type="button" class="pill-btn danger act-cat-del"
-          ${c.used_count > 0 || c.name === '其他' ? 'disabled title="使用中或備援類別，無法刪除"' : ''}>刪除</button>
-      </span>
-    </li>`).join('');
+  $('#admin-cats').innerHTML = overview.categories.map((c) => {
+    const deleteReason = c.used_count > 0 || c.name === '其他'
+      ? '使用中或備援類別，無法刪除'
+      : '';
+    const deleteState = deleteReason
+      ? `aria-disabled="true" aria-label="刪除：${deleteReason}" data-disabled-reason="${deleteReason}"`
+      : '';
+    return `
+      <li data-id="${c.id}">
+        <span class="member-name-row">
+          ${escapeHtml(c.name)}
+          <span class="member-tag">${c.used_count} 筆支出</span>
+        </span>
+        <span class="admin-actions">
+          <button type="button" class="pill-btn danger act-cat-del" ${deleteState}>刪除</button>
+        </span>
+      </li>`;
+  }).join('');
 
   $$('#admin-cats .act-cat-del').forEach((btn) => {
     btn.addEventListener('click', async () => {
+      if (btn.dataset.disabledReason) return toast(btn.dataset.disabledReason);
       const li = btn.closest('li');
       const cat = overview.categories.find((c) => c.id === li.dataset.id);
       if (!await AppDialog.confirm({
@@ -299,6 +318,7 @@ function renderTrash() {
 /* ===== 其他操作 ===== */
 $('#form-admin-add').addEventListener('submit', async (ev) => {
   ev.preventDefault();
+  if (!validateForm(ev.currentTarget)) return;
   try {
     await api(`/api/groups/${overview.group.id}/members`, {
       method: 'POST',
@@ -311,6 +331,7 @@ $('#form-admin-add').addEventListener('submit', async (ev) => {
 
 $('#form-admin-add-cat').addEventListener('submit', async (ev) => {
   ev.preventDefault();
+  if (!validateForm(ev.currentTarget)) return;
   try {
     await api(`/api/groups/${overview.group.id}/categories`, {
       method: 'POST',
@@ -336,6 +357,7 @@ $('#btn-clear-trash').addEventListener('click', async () => {
 
 $('#form-rename').addEventListener('submit', async (ev) => {
   ev.preventDefault();
+  if (!validateForm(ev.currentTarget)) return;
   try {
     await api(`/api/groups/${overview.group.id}`, {
       method: 'PATCH',
@@ -350,8 +372,9 @@ $('#form-rename').addEventListener('submit', async (ev) => {
 
 $('#form-password').addEventListener('submit', async (ev) => {
   ev.preventDefault();
+  if (!validateForm(ev.currentTarget)) return;
   if ($('#pw-next').value !== $('#pw-confirm').value) {
-    return toast('兩次輸入的新密碼不一致');
+    return AppForm.invalidate($('#pw-confirm'), '兩次輸入的新密碼不一致', { notify: toast });
   }
   try {
     await api('/api/admin/password', {

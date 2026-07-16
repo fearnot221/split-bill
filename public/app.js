@@ -172,7 +172,14 @@ function animateNumber(el, target, prefix = '', compact = false) {
   el._num = target;
   const render = (value) => (prefix && value > 0 ? prefix : '') + (compact ? fmtCompact(value) : fmt(value));
   const exact = (prefix && target > 0 ? prefix : '') + fmt(target);
-  el.title = exact;
+  const compacted = compact && render(target) !== exact;
+  if (compacted) {
+    el.dataset.tooltip = exact;
+    el.tabIndex = 0;
+  } else {
+    delete el.dataset.tooltip;
+    el.removeAttribute('tabindex');
+  }
   el.setAttribute('aria-label', exact);
   if (from === target || REDUCED_MOTION) { el.textContent = render(target); return; }
   cancelAnimationFrame(el._raf);
@@ -344,16 +351,16 @@ function expenseItemHtml(e) {
   const amount = escapeHtml(`${isIncome(e) ? '+' : ''}${fmt(e.amount)}`);
   return `
     <li class="expense-item${kindCls}" data-id="${e.id}">
-      <button type="button" class="expense-open" aria-label="編輯帳目：${description}，${amount}">
+      <button type="button" class="expense-open" aria-label="編輯帳目：${description}，${amount}${e.receipt ? '，附有單據' : ''}">
         ${catIcon(e.category)}
         <span class="expense-info">
-          <span class="expense-desc">${description}${e.receipt ? `<span class="clip-ico" title="附有單據">${ICONS.clip}</span>` : ''}</span>
+          <span class="expense-desc">${description}${e.receipt ? `<span class="clip-ico" aria-hidden="true">${ICONS.clip}</span>` : ''}</span>
           <span class="expense-meta">${meta}</span>
           ${e.note ? `<span class="expense-note">${escapeHtml(e.note)}</span>` : ''}
         </span>
         <span class="expense-amount">${amount}</span>
       </button>
-      <button type="button" class="expense-del" aria-label="刪除「${description}」" title="刪除">${ICONS.trash}</button>
+      <button type="button" class="expense-del" aria-label="刪除「${description}」" data-tooltip="刪除">${ICONS.trash}</button>
     </li>`;
 }
 
@@ -920,7 +927,6 @@ function syncSmartAnalyzeButton() {
   button.classList.toggle('analyzing', smartAnalyzing);
   button.querySelector('.analyze-icon').classList.toggle('hidden', smartAnalyzing);
   button.querySelector('.cancel-icon').classList.toggle('hidden', !smartAnalyzing);
-  button.title = smartAnalyzing ? '取消分析' : smartReceiptTask ? '正在處理單據' : '分析帳目';
 }
 
 function resizeSmartInput() {
@@ -1306,7 +1312,7 @@ function renderSmartRecents(expenses) {
   list.dataset.signature = signature;
   list.innerHTML = recent.map((expense) => `
     <button type="button" class="pill-btn smart-recent" data-id="${expense.id}"${smartAnalyzing ? ' disabled' : ''}
-      title="再記一筆 ${escapeHtml(expense.description)}">↻ ${escapeHtml(expense.description)}</button>
+      aria-label="再記一筆 ${escapeHtml(expense.description)}">↻ ${escapeHtml(expense.description)}</button>
   `).join('');
 }
 
@@ -1788,8 +1794,12 @@ function setKind(kind) {
   $('#exp-categories').classList.toggle('hidden', isTr);
   $('.split-header').classList.toggle('hidden', isTr);
   $('#label-transfer-to').classList.toggle('hidden', !isTr);
-  $('#exp-desc').required = !isTr;
-  $('#exp-desc').placeholder = isTr ? '選填，例如：訂房代墊、儲值公帳' : '例如：晚餐、車票';
+  const transferTarget = $('#exp-transfer-to');
+  const description = $('#exp-desc');
+  transferTarget.required = isTr;
+  description.required = !isTr;
+  description.placeholder = isTr ? '選填，例如：訂房代墊、儲值公帳' : '例如：晚餐、車票';
+  (isTr ? description : transferTarget).removeAttribute('aria-invalid');
   if (isTr) {
     $('#split-members').classList.add('hidden');
     $('#split-toolbar').classList.add('hidden');
@@ -2298,10 +2308,12 @@ function showSplitFormError(message, focusTarget) {
   target.scrollIntoView({ block: 'center', behavior: reduceMotion ? 'auto' : 'smooth' });
 }
 
+AppForm.bind($('#form-expense'));
 $('#form-expense').addEventListener('submit', async (ev) => {
   ev.preventDefault();
   if (expenseSubmitting || expensePersisted) return;
   if (receiptTask) return toast('單據仍在處理，完成後即可儲存');
+  if (!AppForm.validate(ev.currentTarget, { notify: toast })) return;
   const amount = Number($('#exp-amount').value);
   let payload;
 

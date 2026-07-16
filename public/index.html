@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#f5f3ee" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#191813" media="(prefers-color-scheme: dark)">
   <title>分帳小工具 — 記帳分帳</title>
-  <link rel="stylesheet" href="style.css?v=33">
+  <link rel="stylesheet" href="style.css?v=35">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%2344705a'/><text x='50' y='72' font-size='60' text-anchor='middle' fill='white' font-family='Helvetica,Arial,sans-serif' font-weight='bold'>$</text></svg>">
 </head>
 <body>
@@ -60,7 +60,7 @@
           </div>
           <div id="smart-receipt" class="smart-receipt hidden">
             <button type="button" id="btn-smart-receipt-view" class="receipt-preview"
-              aria-label="查看待分析單據" title="查看單據">
+              aria-label="查看待分析單據" data-tooltip="查看單據">
               <img id="smart-receipt-thumb" class="receipt-thumb" alt="待分析單據縮圖">
             </button>
             <span id="smart-receipt-name"></span>
@@ -84,11 +84,11 @@
             <input type="file" id="smart-receipt-file" accept="image/*" class="hidden">
             <input type="file" id="smart-camera-file" accept="image/*" capture="environment" class="hidden">
             <button type="button" id="btn-smart-voice" class="icon-btn smart-voice hidden"
-              aria-label="語音輸入" aria-pressed="false" title="語音輸入">
+              aria-label="語音輸入" aria-pressed="false" data-tooltip="語音輸入">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><path d="M12 17v5"/><path d="M8 22h8"/></svg>
             </button>
             <button type="button" id="btn-smart-camera" class="icon-btn smart-camera"
-              aria-label="拍攝單據" title="拍攝單據">
+              aria-label="拍攝單據" data-tooltip="拍攝單據">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h3l2-3h6l2 3h3a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2Z"/><circle cx="12" cy="13" r="4"/></svg>
             </button>
             <button type="button" id="btn-smart-receipt" class="btn btn-secondary btn-sm">
@@ -117,7 +117,8 @@
             <label class="visually-hidden" for="filter-text">搜尋紀錄</label>
             <input type="search" id="filter-text" placeholder="搜尋說明、付款人…" autocomplete="off">
             <button type="button" id="btn-toggle-filters" class="icon-btn filter-toggle"
-              aria-label="展開進階篩選" aria-expanded="false" aria-controls="filter-options" title="篩選">
+              aria-label="展開進階篩選" aria-expanded="false" aria-controls="filter-options"
+              data-tooltip="篩選">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16"/><path d="M7 12h10"/><path d="M10 19h4"/></svg>
             </button>
           </div>
@@ -202,7 +203,7 @@
 
     </main>
 
-    <button id="btn-add-expense" class="fab hidden" aria-label="手動新增紀錄" title="手動新增">
+    <button id="btn-add-expense" class="fab hidden" aria-label="手動新增紀錄" data-tooltip="手動新增">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
     </button>
 
@@ -235,7 +236,7 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
         </button>
       </div>
-      <form id="form-expense">
+      <form id="form-expense" novalidate data-app-form>
         <div class="seg kind-seg" role="group" aria-label="紀錄類型">
           <button type="button" id="kind-expense" class="seg-btn active" aria-pressed="true">支出</button>
           <button type="button" id="kind-income" class="seg-btn" aria-pressed="false">收入</button>
@@ -249,14 +250,16 @@
           <ul id="ai-review-warnings"></ul>
         </div>
         <label>項目說明
-          <input type="text" id="exp-desc" placeholder="例如：晚餐、車票" maxlength="50" required>
+          <input type="text" id="exp-desc" placeholder="例如：晚餐、車票" maxlength="50"
+            data-validation-label="項目說明" required>
         </label>
         <div class="row-2">
           <label>金額
-            <input type="number" id="exp-amount" placeholder="0" min="0.01" max="9999999999.99" step="0.01" inputmode="decimal" required>
+            <input type="number" id="exp-amount" placeholder="0" min="0.01" max="9999999999.99"
+              step="0.01" inputmode="decimal" data-validation-label="金額" required>
           </label>
           <label>日期
-            <input type="date" id="exp-date" required>
+            <input type="date" id="exp-date" data-validation-label="日期" required>
           </label>
         </div>
         <label id="label-cats">分類</label>
@@ -265,7 +268,7 @@
           <select id="exp-payer" class="app-select"></select>
         </label>
         <label id="label-transfer-to" class="select-field hidden">匯給
-          <select id="exp-transfer-to" class="app-select"></select>
+          <select id="exp-transfer-to" class="app-select" data-validation-label="收款對象"></select>
         </label>
         <div class="split-header">
           <label>分攤方式</label>
@@ -304,7 +307,7 @@
 
   <dialog id="receipt-lightbox" class="app-dialog app-dialog--viewer receipt-lightbox" aria-label="單據預覽">
     <button type="button" id="btn-close-receipt-lightbox" class="icon-btn"
-      aria-label="關閉單據預覽" title="關閉">
+      aria-label="關閉單據預覽" data-tooltip="關閉" data-tooltip-position="below">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
     </button>
     <img id="receipt-lightbox-image" alt="單據原圖" draggable="false">
@@ -339,6 +342,7 @@
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
   <script src="ui-dialog.js?v=2"></script>
-  <script src="app.js?v=53"></script>
+  <script src="ui-form.js?v=2"></script>
+  <script src="app.js?v=55"></script>
 </body>
 </html>

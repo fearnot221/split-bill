@@ -219,6 +219,11 @@ input:not([type="checkbox"]), select, textarea {
 }
 textarea { resize: vertical; line-height: 1.5; }
 input:not([type="checkbox"]):focus, select:focus, textarea:focus { border-color: var(--rule-strong); }
+input[aria-invalid="true"], select[aria-invalid="true"], textarea[aria-invalid="true"] {
+  border-color: var(--red);
+  outline: 2px solid color-mix(in srgb, var(--red) 28%, transparent);
+  outline-offset: 1px;
+}
 input::placeholder, textarea::placeholder { color: var(--sub); opacity: 1; }
 input[type="number"], input[type="date"] { font-family: var(--mono); font-size: 1rem; }
 select {
@@ -247,6 +252,12 @@ select.app-select:focus-visible {
   outline: 2px solid var(--ink);
   outline-offset: 2px;
 }
+select.app-select[aria-invalid="true"],
+select.app-select[aria-invalid="true"]:focus-visible {
+  border-color: var(--red);
+  outline: 2px solid color-mix(in srgb, var(--red) 40%, transparent);
+  outline-offset: 2px;
+}
 select.app-select:disabled {
   color: var(--sub);
   background-color: var(--fill);
@@ -256,6 +267,18 @@ select.app-select:disabled {
   opacity: 1;
 }
 select.app-select option { color: var(--ink); background: var(--card); }
+
+@media (forced-colors: active) {
+  select,
+  select.app-select {
+    appearance: auto;
+    -webkit-appearance: menulist;
+    padding-right: 12px;
+    background-image: none;
+    box-shadow: none;
+    forced-color-adjust: auto;
+  }
+}
 
 .btn {
   display: flex;
@@ -1144,6 +1167,62 @@ select.app-select option { color: var(--ink); background: var(--card); }
 .icon-btn svg { width: 16px; height: 16px; }
 .icon-btn:hover { color: var(--ink); }
 
+[data-tooltip]:not(.fab) { position: relative; }
+[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  z-index: 120;
+  max-width: min(220px, 80vw);
+  padding: 5px 8px;
+  color: var(--paper);
+  background: var(--ink);
+  border: 1px solid var(--rule-strong);
+  border-radius: 6px;
+  font-size: .72rem;
+  font-weight: 650;
+  letter-spacing: 0;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, 4px);
+  transition: opacity .12s, transform .12s;
+}
+[data-tooltip-position="below"]::after {
+  top: calc(100% + 8px);
+  bottom: auto;
+  transform: translate(-50%, -4px);
+}
+.stat-value[data-tooltip] {
+  cursor: help;
+  text-decoration: underline dotted var(--sub);
+  text-underline-offset: 3px;
+}
+.stat-value[data-tooltip]:hover,
+.stat-value[data-tooltip]:focus { overflow: visible; }
+.stat-value[data-tooltip]:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+@media (hover: hover) {
+  [data-tooltip]:hover::after,
+  [data-tooltip]:focus-visible::after {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+@media (hover: none) {
+  [data-tooltip]::after { display: none; }
+  .stat-value[data-tooltip]:focus::after {
+    display: block;
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
 @keyframes fade-in { from { opacity: 0; } }
 @keyframes dialog-slide-up { from { transform: translateY(48px); } }
 @keyframes slide-up { from { transform: translateY(48px); opacity: .3; } }
@@ -1381,8 +1460,10 @@ select.app-select option { color: var(--ink); background: var(--card); }
 }
 .pill-btn:hover { background: var(--fill); }
 .pill-btn.danger { color: var(--red); border-color: var(--red); }
-.pill-btn:disabled { opacity: .35; cursor: not-allowed; }
-.pill-btn:disabled:hover { background: none; }
+.pill-btn:disabled,
+.pill-btn[aria-disabled="true"] { opacity: .45; cursor: not-allowed; }
+.pill-btn:disabled:hover,
+.pill-btn[aria-disabled="true"]:hover { background: none; }
 #admin-trash .expense-item { cursor: default; flex-wrap: wrap; }
 #admin-trash .expense-desc,
 #admin-trash .expense-meta,
@@ -1558,7 +1639,7 @@ select.app-select option { color: var(--ink); background: var(--card); }
   .fab { bottom: 36px; right: calc(50% - 340px); }
 
   .modal { align-items: center; padding: 24px; }
-  .modal-card { border-radius: 8px; max-height: 88vh; }
+  .modal-card { border-radius: 8px; max-height: 100%; }
   .app-dialog[open] { align-items: center; padding: 24px; }
   .app-dialog__surface {
     border-bottom: 1px solid var(--rule-strong);

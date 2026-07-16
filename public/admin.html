@@ -7,7 +7,7 @@
   <meta name="theme-color" content="#f5f3ee" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#191813" media="(prefers-color-scheme: dark)">
   <title>管理面板 — 分帳小工具</title>
-  <link rel="stylesheet" href="style.css?v=33">
+  <link rel="stylesheet" href="style.css?v=35">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%2344705a'/><text x='50' y='72' font-size='60' text-anchor='middle' fill='white' font-family='Helvetica,Arial,sans-serif' font-weight='bold'>$</text></svg>">
 </head>
 <body>
@@ -22,12 +22,14 @@
       <!-- 設定密碼 / 登入 -->
       <section id="auth-section" class="card hidden">
         <h2 id="auth-title">管理員登入</h2>
-        <form id="form-auth">
+        <form id="form-auth" novalidate data-app-form>
           <label>密碼
-            <input type="password" id="auth-password" autocomplete="current-password" maxlength="128" required>
+            <input type="password" id="auth-password" autocomplete="current-password" maxlength="128"
+              data-validation-label="密碼" data-validation-group="auth-passwords" required>
           </label>
           <label id="auth-confirm-wrap" class="hidden">確認密碼
-            <input type="password" id="auth-confirm" autocomplete="new-password" minlength="8" maxlength="128">
+            <input type="password" id="auth-confirm" autocomplete="new-password" minlength="8"
+              maxlength="128" data-validation-label="確認密碼" data-validation-group="auth-passwords">
           </label>
           <button type="submit" class="btn btn-primary" id="auth-submit">登入</button>
         </form>
@@ -49,8 +51,9 @@
           <h2>成員管理</h2>
           <p class="hint">可改名（帳目會跟著更新）；有帳務紀錄的成員無法刪除。</p>
           <ul id="admin-members" class="member-list"></ul>
-          <form id="form-admin-add" class="inline-form">
-            <input type="text" id="admin-new-name" placeholder="新成員名字" maxlength="20" required>
+          <form id="form-admin-add" class="inline-form" novalidate data-app-form>
+            <input type="text" id="admin-new-name" placeholder="新成員名字" maxlength="20"
+              data-validation-label="成員名字" required>
             <button type="submit" class="btn btn-secondary btn-sm">新增</button>
           </form>
         </section>
@@ -59,8 +62,9 @@
           <h2>類別管理</h2>
           <p class="hint">被紀錄（含回收桶）使用中的類別無法刪除；「其他」為預設備援類別。</p>
           <ul id="admin-cats" class="member-list"></ul>
-          <form id="form-admin-add-cat" class="inline-form">
-            <input type="text" id="admin-new-cat" placeholder="新類別名稱" maxlength="10" required>
+          <form id="form-admin-add-cat" class="inline-form" novalidate data-app-form>
+            <input type="text" id="admin-new-cat" placeholder="新類別名稱" maxlength="10"
+              data-validation-label="類別名稱" required>
             <button type="submit" class="btn btn-secondary btn-sm">新增</button>
           </form>
         </section>
@@ -75,24 +79,29 @@
 
         <section class="card">
           <h2>帳本設定</h2>
-          <form id="form-rename" class="inline-form">
-            <input type="text" id="ledger-name" placeholder="帳本名稱" maxlength="30" required>
-            <input type="text" id="ledger-currency" placeholder="幣別" maxlength="5" aria-label="幣別" required>
+          <form id="form-rename" class="inline-form" novalidate data-app-form>
+            <input type="text" id="ledger-name" placeholder="帳本名稱" maxlength="30"
+              data-validation-label="帳本名稱" required>
+            <input type="text" id="ledger-currency" placeholder="幣別" maxlength="5" aria-label="幣別"
+              data-validation-label="幣別" required>
             <button type="submit" class="btn btn-secondary btn-sm">儲存</button>
           </form>
         </section>
 
         <section class="card">
           <h2>變更密碼</h2>
-          <form id="form-password">
+          <form id="form-password" novalidate data-app-form>
             <label>目前密碼
-              <input type="password" id="pw-current" autocomplete="current-password" maxlength="128" required>
+              <input type="password" id="pw-current" autocomplete="current-password" maxlength="128"
+                data-validation-label="目前密碼" required>
             </label>
             <label>新密碼（至少 8 碼）
-              <input type="password" id="pw-next" autocomplete="new-password" minlength="8" maxlength="128" required>
+              <input type="password" id="pw-next" autocomplete="new-password" minlength="8" maxlength="128"
+                data-validation-label="新密碼" data-validation-group="new-passwords" required>
             </label>
             <label>確認新密碼
-              <input type="password" id="pw-confirm" autocomplete="new-password" minlength="8" maxlength="128" required>
+              <input type="password" id="pw-confirm" autocomplete="new-password" minlength="8" maxlength="128"
+                data-validation-label="確認新密碼" data-validation-group="new-passwords" required>
             </label>
             <button type="submit" class="btn btn-secondary btn-sm">更新密碼</button>
           </form>
@@ -132,6 +141,7 @@
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
   <script src="ui-dialog.js?v=2"></script>
-  <script src="admin.js?v=12"></script>
+  <script src="ui-form.js?v=2"></script>
+  <script src="admin.js?v=14"></script>
 </body>
 </html>
