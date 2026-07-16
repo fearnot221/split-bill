@@ -50,7 +50,9 @@ npm install
 npm start
 ```
 
-打開 http://localhost:3000 即可使用。開發模式（改檔自動重啟）：`npm run dev`，換埠號：`PORT=8080 npm start`。
+打開 http://localhost:3000 即可使用。服務預設只監聽 `127.0.0.1`；開發模式（改檔自動重啟）：`npm run dev`，換埠號：`PORT=8080 npm start`。只有確實需要區網直連時才改用 `HOST=0.0.0.0 npm start`。
+
+`GET /healthz` 會回傳 `ok`，可供反向代理或服務管理器做不含帳務與 AI 狀態的存活檢查。
 
 資料存在伺服器的 `data.db`（SQLite，已列入 `.gitignore`），所有裝置連同一台伺服器即共用同一份帳本。
 
@@ -128,7 +130,7 @@ BACKUP_DIR=/path/to/backups npm run backup
 git clone https://github.com/fearnot221/split-bill.git
 cd split-bill
 npm install
-NODE_ENV=production APP_PASSWORD='請使用足夠長的密碼' PORT=3000 npm start
+NODE_ENV=production APP_PASSWORD='請使用足夠長的密碼' HOST=127.0.0.1 PORT=3000 npm start
 ```
 
 建議用 systemd 常駐（`/etc/systemd/system/split-bill.service`）：
@@ -142,6 +144,7 @@ After=network.target
 WorkingDirectory=/opt/split-bill
 ExecStart=/usr/bin/node server.js
 Environment=PORT=3000
+Environment=HOST=127.0.0.1
 Environment=NODE_ENV=production
 EnvironmentFile=-/etc/split-bill.env
 Restart=always

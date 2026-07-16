@@ -384,19 +384,21 @@ select.app-select option { color: var(--ink); background: var(--card); }
   font-weight: 700;
 }
 .smart-participants-head small { font-size: .68rem; font-weight: 600; }
-#btn-smart-participants-clear { min-height: 36px; }
+#btn-smart-participants-clear,
+#btn-smart-participants-more { min-height: 36px; }
+.smart-participants-actions { display: flex; gap: 6px; }
 .smart-participant-list {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   min-width: 0;
   min-height: 40px;
-  overflow-x: auto;
+  overflow: visible;
   padding: 2px 0;
-  scrollbar-width: none;
 }
-.smart-participant-list::-webkit-scrollbar { display: none; }
 .smart-participant {
   min-width: 44px;
+  max-width: 100%;
   min-height: 40px;
   flex: 0 0 auto;
   padding: 7px 12px;
@@ -407,6 +409,7 @@ select.app-select option { color: var(--ink); background: var(--card); }
   border: 1px solid var(--rule);
   border-radius: 8px;
   cursor: pointer;
+  overflow-wrap: anywhere;
 }
 .smart-participant[aria-pressed="true"] {
   color: var(--paper);
@@ -1011,7 +1014,6 @@ select.app-select option { color: var(--ink); background: var(--card); }
   display: flex;
   align-items: flex-end;
   justify-content: center;
-  animation: fade-in .15s ease;
 }
 .app-dialog::backdrop { background: rgba(20, 18, 14, .58); }
 .app-dialog__surface {
@@ -1025,7 +1027,7 @@ select.app-select option { color: var(--ink); background: var(--card); }
   border: 1px solid var(--rule-strong);
   border-bottom: 0;
   border-radius: 8px 8px 0 0;
-  animation: slide-up .22s cubic-bezier(.22, 1, .36, 1);
+  animation: dialog-slide-up .22s cubic-bezier(.22, 1, .36, 1);
 }
 .app-dialog__header {
   display: flex;
@@ -1105,7 +1107,7 @@ select.app-select option { color: var(--ink); background: var(--card); }
   padding: 22px 22px calc(22px + env(safe-area-inset-bottom));
   padding-left: max(22px, calc(12px + env(safe-area-inset-left)));
   padding-right: max(22px, calc(12px + env(safe-area-inset-right)));
-  animation: slide-up .24s cubic-bezier(.22, 1, .36, 1);
+  animation: dialog-slide-up .24s cubic-bezier(.22, 1, .36, 1);
 }
 .modal-card[aria-busy="true"] { cursor: wait; }
 #form-expense {
@@ -1143,6 +1145,7 @@ select.app-select option { color: var(--ink); background: var(--card); }
 .icon-btn:hover { color: var(--ink); }
 
 @keyframes fade-in { from { opacity: 0; } }
+@keyframes dialog-slide-up { from { transform: translateY(48px); } }
 @keyframes slide-up { from { transform: translateY(48px); opacity: .3; } }
 
 /* Modal 關閉過場 */
@@ -1165,12 +1168,31 @@ select.app-select option { color: var(--ink); background: var(--card); }
 }
 .ai-review-title { font-weight: 700; }
 .ai-review-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
   margin-top: 4px;
   color: var(--ink);
   font-size: .8rem;
   font-weight: 600;
   line-height: 1.45;
 }
+.ai-review-summary-action,
+.ai-review-summary-text {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  font: inherit;
+  color: inherit;
+}
+.ai-review-summary-action {
+  padding: 1px 0;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-bottom: 1px dotted currentColor;
+  cursor: pointer;
+}
+.ai-review-summary-action:hover { border-bottom-style: solid; }
 .ai-review ul { margin: 3px 0 0 17px; color: var(--sub); }
 .ai-review.notice { border-left-color: var(--warn); }
 .ai-review.needs-attention { border-left-color: var(--red); }
@@ -1362,6 +1384,14 @@ select.app-select option { color: var(--ink); background: var(--card); }
 .pill-btn:disabled { opacity: .35; cursor: not-allowed; }
 .pill-btn:disabled:hover { background: none; }
 #admin-trash .expense-item { cursor: default; flex-wrap: wrap; }
+#admin-trash .expense-desc,
+#admin-trash .expense-meta,
+#admin-trash .expense-note {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 #btn-logout { margin-top: 4px; }
 
 @media (max-width: 420px) {
@@ -1426,7 +1456,8 @@ select.app-select option { color: var(--ink); background: var(--card); }
   #btn-smart-receipt span { display: none; }
   #btn-smart-analyze { flex: 1; min-width: 0; }
   .smart-participant { min-height: 44px; }
-  #btn-smart-participants-clear { min-height: 44px; }
+  #btn-smart-participants-clear,
+  #btn-smart-participants-more { min-height: 44px; }
   #btn-toggle-filters {
     display: flex;
     width: 44px;
@@ -1451,6 +1482,11 @@ select.app-select option { color: var(--ink); background: var(--card); }
     align-items: center;
   }
   #exp-categories .chip {
+    display: inline-flex;
+    min-height: 44px;
+    align-items: center;
+  }
+  .ai-review-summary-action {
     display: inline-flex;
     min-height: 44px;
     align-items: center;
@@ -1529,6 +1565,7 @@ select.app-select option { color: var(--ink); background: var(--card); }
     border-radius: 8px;
     padding: 20px 22px;
   }
+  @keyframes dialog-slide-up { from { transform: translateY(20px) scale(.98); } }
   @keyframes slide-up { from { transform: translateY(20px) scale(.98); opacity: 0; } }
 
   .toast { bottom: 48px; }

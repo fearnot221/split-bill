@@ -24,6 +24,30 @@ const context = {
   defaultMemberId: 'me',
 };
 
+function receiptResponse(overrides = {}, usage = {}) {
+  return {
+    output_text: JSON.stringify({
+      isLedgerEntry: true,
+      kind: 'expense',
+      description: '晚餐',
+      amount: 120,
+      category: '餐飲',
+      expenseDate: '2026-07-14',
+      payerName: '我',
+      participantNames: ['我'],
+      splitMode: 'none',
+      customSplits: [],
+      transferToName: null,
+      note: null,
+      confidence: 0.95,
+      warnings: [],
+      ...overrides,
+    }),
+    output: [],
+    usage: { input_tokens: 90, output_tokens: 20, ...usage },
+  };
+}
+
 test('defines a strict structured-output schema', () => {
   assert.equal(AI_DRAFT_SCHEMA.type, 'object');
   assert.equal(AI_DRAFT_SCHEMA.additionalProperties, false);
@@ -1107,6 +1131,876 @@ test('warns when neither receipt pass can identify the date', async () => {
   assert.equal(requestCount, 2);
   assert.equal(result.draft.expenseDate, '2026-07-14');
   assert.match(result.draft.warnings.join(' '), /尚未辨識單據日期/);
+});
+
+test('uses a valid high-detail date even when the low-detail draft scores higher', async () => {
+  const responses = [
+    receiptResponse({ expenseDate: null, confidence: 0.5, warnings: ['日期小字較模糊'] }),
+    receiptResponse({ description: '', expenseDate: '2026-07-13', confidence: 0.7 }),
+  ];
+  const client = { responses: { create: async () => responses.shift() } };
+  const result = await analyzeWithOpenAI({
+    client,
+    model: 'gpt-5.6-sol',
+    text: '',
+    receiptDataUrl: 'data:image/jpeg;base64,/9j/',
+    context,
+    today: '2026-07-15',
+    safetyIdentifier: 'ledger_test',
+  });
+
+  assert.equal(result.draft.description, '晚餐');
+  assert.equal(result.draft.expenseDate, '2026-07-13');
+  assert.equal(result.draft.ready, true);
+  assert.doesNotMatch(result.draft.warnings.join(' '), /暫用今天/);
+});
+
+test('prefers high-detail amount and date evidence while warning about conflicts', async () => {
+  const responses = [
+    receiptResponse({
+      amount: 120,
+      expenseDate: '2026-07-14',
+      confidence: 0.5,
+      warnings: ['影像小字較模糊'],
+    }),
+    receiptResponse({
+      description: '',
+      amount: 130,
+      expenseDate: '2026-07-13',
+      confidence: 0.7,
+    }),
+  ];
+  const client = { responses: { create: async () => responses.shift() } };
+  const result = await analyzeWithOpenAI({
+    client,
+    model: 'gpt-5.6-sol',
+    text: '',
+    receiptDataUrl: 'data:image/jpeg;base64,/9j/',
+    context,
+    today: '2026-07-15',
+    safetyIdentifier: 'ledger_test',
+  });
+  const warnings = result.draft.warnings.join(' ');
+
+  assert.equal(result.draft.description, '晚餐');
+  assert.equal(result.draft.amount, 130);
+  assert.equal(result.draft.expenseDate, '2026-07-13');
+  assert.equal(result.draft.ready, true);
+  assert.match(warnings, /金額不一致.*120／130/);
+  assert.match(warnings, /日期不一致.*2026-07-14／2026-07-13/);
+});
+
+test('keeps explicit text amount and date above conflicting receipt evidence', async () => {
+  let requestCount = 0;
+  const responses = [
+    receiptResponse({ amount: 130, expenseDate: '2026-07-13', confidence: 0.95 }),
+  ];
+  const client = {
+    responses: {
+      create: async () => {
+        requestCount += 1;
+        return responses.shift();
+      },
+    },
+  };
+  const result = await analyzeWithOpenAI({
+    client,
+    model: 'gpt-5.6-sol',
+    text: '晚餐總額 120 元，日期 2026-07-14，我付',
+    receiptDataUrl: 'data:image/jpeg;base64,/9j/',
+    context,
+    today: '2026-07-15',
+    safetyIdentifier: 'ledger_test',
+  });
+  const warnings = result.draft.warnings.join(' ');
+
+  assert.equal(requestCount, 1);
+  assert.equal(result.draft.amount, 120);
+  assert.equal(result.draft.expenseDate, '2026-07-14');
+  assert.match(warnings, /已採用文字金額 120/);
+  assert.match(warnings, /已採用文字日期 2026-07-14/);
+});
+
+test('treats bare bookkeeping amounts as text evidence but ignores quantities', async () => {
+  const quantityTexts = [
+    '總額看單據，買 3 杯咖啡',
+    '買 12 顆水餃，金額看單據',
+    '總計 3 杯咖啡，金額看單據',
+    '門市 123 早餐，金額看單據',
+    '午餐 2 人分',
+    '停車 2 小時',
+    '住宿 2 晚',
+    '計程車 15 公里',
+    '買 2 件衣服',
+    '買 12 盒蛋糕',
+    '買 12 瓶飲料',
+    '買 12 包零食',
+    '訂 12 位座位',
+    '買 12 組餐具',
+    '租 12 台腳踏車',
+    '買 12 罐咖啡',
+    '搭 12 站捷運',
+    '打 8 折',
+    '12 號桌晚餐',
+    'iPhone 16 手機殼，金額看單據',
+    '買 500ml 牛奶，金額看單據',
+  ];
+  for (const text of quantityTexts) {
+    const client = { responses: { create: async () => receiptResponse({ amount: 300 }) } };
+    const result = await analyzeWithOpenAI({
+      client,
+      model: 'gpt-5.6-sol',
+      text,
+      receiptDataUrl: 'data:image/jpeg;base64,/9j/',
+      context,
+      today: '2026-07-15',
+      safetyIdentifier: 'ledger_test',
+    });
+    assert.equal(result.draft.amount, 300, text);
+  }
+
+  const client = { responses: { create: async () => receiptResponse({ amount: 130 }) } };
+  const shorthand = await analyzeWithOpenAI({
+    client,
+    model: 'gpt-5.6-sol',
+    text: '晚餐 120，我付',
+    receiptDataUrl: 'data:image/jpeg;base64,/9j/',
+    context,
+    today: '2026-07-15',
+    safetyIdentifier: 'ledger_test',
+  });
+  assert.equal(shorthand.draft.amount, 120);
+
+  for (const [text, receiptAmount, expectedAmount] of [
+    ['2 人晚餐 120，我付', 300, 120],
+    ['住宿 2000，我付', 2500, 2000],
+    ['買 3 杯咖啡，總計 300', 999, 300],
+  ]) {
+    const client = { responses: { create: async () => receiptResponse({ amount: receiptAmount }) } };
+    const result = await analyzeWithOpenAI({
+      client,
+      model: 'gpt-5.6-sol',
+      text,
+      receiptDataUrl: 'data:image/jpeg;base64,/9j/',
+      context,
+      today: '2026-07-15',
+      safetyIdentifier: 'ledger_test',
+    });
+    assert.equal(result.draft.amount, expectedAmount, text);
+  }
+});
+
+test('does not treat brand names or split fractions as receipt date evidence', async () => {
+  for (const text of [
+    '7-11 早餐，金額看單據',
+    '7/11 早餐，金額看單據',
+    '晚餐各付 1/2，金額看單據',
+    '我和小明各 1/2，金額看單據',
+    '日期以單據為準，7/11 早餐',
+  ]) {
+    const client = {
+      responses: { create: async () => receiptResponse({ expenseDate: '2025-12-31' }) },
+    };
+    const result = await analyzeWithOpenAI({
+      client,
+      model: 'gpt-5.6-sol',
+      text,
+      receiptDataUrl: 'data:image/jpeg;base64,/9j/',
+      context,
+      today: '2026-07-15',
+      safetyIdentifier: 'ledger_test',
+    });
+    assert.equal(result.draft.expenseDate, '2025-12-31', text);
+  }
+
+  const client = {
+    responses: { create: async () => receiptResponse({ expenseDate: '2026-07-14' }) },
+  };
+  const result = await analyzeWithOpenAI({
+    client,
+    model: 'gpt-5.6-sol',
+    text: '2025/12/31 晚餐，金額看單據',
+    receiptDataUrl: 'data:image/jpeg;base64,/9j/',
+    context,
+    today: '2026-07-15',
+    safetyIdentifier: 'ledger_test',
+  });
+  assert.equal(result.draft.expenseDate, '2025-12-31');
+
+  const shortDateClient = {
+    responses: { create: async () => receiptResponse({ expenseDate: '2025-12-31' }) },
+  };
+  const shortDate = await analyzeWithOpenAI({
+    client: shortDateClient,
+    model: 'gpt-5.6-sol',
+    text: '8/20 高鐵 120，我付',
+    receiptDataUrl: 'data:image/jpeg;base64,/9j/',
+    context,
+    today: '2026-07-15',
+    safetyIdentifier: 'ledger_test',
+  });
+  assert.equal(shortDate.draft.expenseDate, '2026-08-20');
+});
+
+test('skips high detail when text resolves missing receipt fields or warnings are unrelated', async () => {
+  let requestCount = 0;
+  const textResolvedClient = {
+    responses: {
+      create: async () => {
+        requestCount += 1;
+        return receiptResponse({ amount: null, expenseDate: null, confidence: 0.95 });
+      },
+    },
+  };
+  const textResolved = await analyzeWithOpenAI({
+    client: textResolvedClient,
+    model: 'gpt-5.6-sol',
+    text: '晚餐總額 120 元，日期 2026-07-14，我付',
+    receiptDataUrl: 'data:image/jpeg;base64,/9j/',
+    context,
+    today: '2026-07-15',
+    safetyIdentifier: 'ledger_test',
+  });
+  assert.equal(requestCount, 1);
+  assert.equal(textResolved.draft.amount, 120);
+  assert.equal(textResolved.draft.expenseDate, '2026-07-14');
+
+  requestCount = 0;
+  const unrelatedWarningClient = {
+    responses: {
+      create: async () => {
+        requestCount += 1;
+        return receiptResponse({ warnings: ['載具條碼小字模糊，未辨識店家電話'] });
+      },
+    },
+  };
+  const unrelatedWarning = await analyzeWithOpenAI({
+    client: unrelatedWarningClient,
+    model: 'gpt-5.6-sol',
+    text: '',
+    receiptDataUrl: 'data:image/jpeg;base64,/9j/',
+    context,
+    today: '2026-07-15',
+    safetyIdentifier: 'ledger_test',
+  });
+  assert.equal(requestCount, 1);
+  assert.equal(unrelatedWarning.draft.ready, true);
+
+  requestCount = 0;
+  const completeTextClient = {
+    responses: {
+      create: async () => {
+        requestCount += 1;
+        return receiptResponse({ confidence: 0.5 });
+      },
+    },
+  };
+  const completeText = await analyzeWithOpenAI({
+    client: completeTextClient,
+    model: 'gpt-5.6-sol',
+    text: '晚餐總額 120 元，日期 2026-07-14，我付不分攤',
+    receiptDataUrl: 'data:image/jpeg;base64,/9j/',
+    context,
+    today: '2026-07-15',
+    safetyIdentifier: 'ledger_test',
+  });
+  assert.equal(requestCount, 1);
+  assert.equal(completeText.draft.ready, true);
+});
+
+test('evaluates uncertainty warnings per field and per clause', async () => {
+  const separatedWarnings = [
+    receiptResponse({
+      amount: 120,
+      confidence: 0.95,
+      warnings: ['金額已辨識為 120', '店名模糊'],
+    }),
+    receiptResponse({ amount: 130, confidence: 0.6 }),
+  ];
+  const separated = await analyzeWithOpenAI({
+    client: { responses: { create: async () => separatedWarnings.shift() } },
+    model: 'gpt-5.6-sol',
+    text: '',
+    receiptDataUrl: 'data:image/jpeg;base64,/9j/',
+    context,
+    today: '2026-07-15',
+    safetyIdentifier: 'ledger_test',
+  });
+  assert.equal(separated.draft.amount, 120);
+
+  for (const warning of [
+    '金額不確定',
+    '總額可能有誤',
+    '實付金額疑似 120',
+    '日期可能有誤',
+    '店名不確定',
+  ]) {
+    let requestCount = 0;
+    const responses = [receiptResponse({ warnings: [warning] }), receiptResponse()];
+    await analyzeWithOpenAI({
+      client: { responses: { create: async () => {
+        requestCount += 1;
+        return responses.shift();
+      } } },
+      model: 'gpt-5.6-sol',
+      text: '',
+      receiptDataUrl: 'data:image/jpeg;base64,/9j/',
+      context,
+      today: '2026-07-15',
+      safetyIdentifier: 'ledger_test',
+    });
+    assert.equal(requestCount, 2, warning);
+  }
+});
+
+test('rejects unreliable or cross-kind high-detail amounts', async () => {
+  const crossKindResponses = [
+    receiptResponse({ amount: null, confidence: 0.95 }),
+    receiptResponse({ kind: 'income', description: '', amount: 999, confidence: 0 }),
+  ];
+  const crossKind = await analyzeWithOpenAI({
+    client: { responses: { create: async () => crossKindResponses.shift() } },
+    model: 'gpt-5.6-sol',
+    text: '',
+    receiptDataUrl: 'data:image/jpeg;base64,/9j/',
+    context,
+    today: '2026-07-15',
+    safetyIdentifier: 'ledger_test',
+  });
+  assert.equal(crossKind.draft.kind, 'expense');
+  assert.equal(crossKind.draft.amount, null);
+  assert.equal(crossKind.draft.ready, false);
+
+  const nonEntryResponses = [
+    receiptResponse({ amount: null, confidence: 0.95 }),
+    receiptResponse({ isLedgerEntry: false, amount: 999, confidence: 0.95 }),
+  ];
+  const nonEntry = await analyzeWithOpenAI({
+    client: { responses: { create: async () => nonEntryResponses.shift() } },
+    model: 'gpt-5.6-sol',
+    text: '',
+    receiptDataUrl: 'data:image/jpeg;base64,/9j/',
+    context,
+    today: '2026-07-15',
+    safetyIdentifier: 'ledger_test',
+  });
+  assert.equal(nonEntry.draft.amount, null);
+  assert.equal(nonEntry.draft.ready, false);
+});
+
+test('does not combine a non-entry high pass into a ready draft', async () => {
+  const responses = [
+    receiptResponse({ description: '', confidence: 0.5 }),
+    receiptResponse({
+      isLedgerEntry: false,
+      description: '這不是單據',
+      confidence: 0.1,
+    }),
+  ];
+  const result = await analyzeWithOpenAI({
+    client: { responses: { create: async () => responses.shift() } },
+    model: 'gpt-5.6-sol',
+    text: '',
+    receiptDataUrl: 'data:image/jpeg;base64,/9j/',
+    context,
+    today: '2026-07-15',
+    safetyIdentifier: 'ledger_test',
+  });
+  assert.equal(result.draft.isLedgerEntry, true);
+  assert.equal(result.draft.description, '');
+  assert.equal(result.draft.ready, false);
+});
+
+test('keeps the low-pass kind when a complete high pass changes ledger type', async () => {
+  const responses = [
+    receiptResponse({ amount: null, expenseDate: null, confidence: 0.95 }),
+    receiptResponse({
+      kind: 'transfer',
+      description: '轉帳',
+      amount: 999,
+      category: null,
+      participantNames: [],
+      splitMode: 'none',
+      transferToName: '小明',
+      confidence: 0.95,
+    }),
+  ];
+  const result = await analyzeWithOpenAI({
+    client: { responses: { create: async () => responses.shift() } },
+    model: 'gpt-5.6-sol',
+    text: '晚餐 120，我付',
+    receiptDataUrl: 'data:image/jpeg;base64,/9j/',
+    context,
+    today: '2026-07-15',
+    safetyIdentifier: 'ledger_test',
+  });
+  assert.equal(result.draft.kind, 'expense');
+  assert.equal(result.draft.amount, 120);
+  assert.equal(result.draft.transferToId, null);
+  assert.match(result.draft.warnings.join(' '), /帳目類型不一致/);
+});
+
+test('does not import unreliable high-detail custom splits', async () => {
+  for (const highOverrides of [
+    { confidence: 0.1 },
+    { confidence: 0.95, isLedgerEntry: false },
+  ]) {
+    const responses = [
+      receiptResponse({ amount: 130, confidence: 0.5 }),
+      receiptResponse({
+        amount: 130,
+        participantNames: ['我', '小明'],
+        splitMode: 'custom',
+        customSplits: [
+          { memberName: '我', amount: 65 },
+          { memberName: '小明', amount: 65 },
+        ],
+        ...highOverrides,
+      }),
+    ];
+    const result = await analyzeWithOpenAI({
+      client: { responses: { create: async () => responses.shift() } },
+      model: 'gpt-5.6-sol',
+      text: '晚餐總額 130，我付',
+      receiptDataUrl: 'data:image/jpeg;base64,/9j/',
+      context,
+      today: '2026-07-15',
+      safetyIdentifier: 'ledger_test',
+    });
+    assert.equal(result.draft.splitMode, 'none');
+    assert.deepEqual(result.draft.customSplits, []);
+  }
+});
+
+test('keeps higher-confidence low amount while using a reliable high date', async () => {
+  const responses = [
+    receiptResponse({ amount: 120, expenseDate: null, confidence: 0.95 }),
+    receiptResponse({ amount: 130, expenseDate: '2026-07-13', confidence: 0.6 }),
+  ];
+  const result = await analyzeWithOpenAI({
+    client: { responses: { create: async () => responses.shift() } },
+    model: 'gpt-5.6-sol',
+    text: '',
+    receiptDataUrl: 'data:image/jpeg;base64,/9j/',
+    context,
+    today: '2026-07-15',
+    safetyIdentifier: 'ledger_test',
+  });
+  assert.equal(result.draft.amount, 120);
+  assert.equal(result.draft.expenseDate, '2026-07-13');
+  assert.match(result.draft.warnings.join(' '), /已保留快速結果/);
+});
+
+test('uses high detail field-by-field instead of replacing a stronger low draft', async () => {
+  const responses = [
+    receiptResponse({
+      amount: 120,
+      expenseDate: null,
+      confidence: 0.95,
+      payerName: '我',
+      category: '餐飲',
+      participantNames: ['我'],
+      splitMode: 'none',
+    }),
+    receiptResponse({
+      description: '錯誤交通項目',
+      amount: 130,
+      expenseDate: '2026-07-13',
+      confidence: 0.6,
+      payerName: '小明',
+      category: '交通',
+      participantNames: ['我', '小明'],
+      splitMode: 'equal',
+    }),
+  ];
+  const result = await analyzeWithOpenAI({
+    client: { responses: { create: async () => responses.shift() } },
+    model: 'gpt-5.6-sol',
+    text: '',
+    receiptDataUrl: 'data:image/jpeg;base64,/9j/',
+    context,
+    today: '2026-07-15',
+    safetyIdentifier: 'ledger_test',
+  });
+  assert.equal(result.draft.description, '晚餐');
+  assert.equal(result.draft.amount, 120);
+  assert.equal(result.draft.expenseDate, '2026-07-13');
+  assert.equal(result.draft.payerId, 'me');
+  assert.equal(result.draft.category, '餐飲');
+  assert.deepEqual(result.draft.participantIds, ['me']);
+  assert.equal(result.draft.splitMode, 'none');
+});
+
+test('preserves explicit text custom splits when their total is self-consistent', async () => {
+  const result = await analyzeWithOpenAI({
+    client: { responses: { create: async () => receiptResponse({ amount: 350 }) } },
+    model: 'gpt-5.6-sol',
+    text: '晚餐 300，小明100、我200，我付',
+    receiptDataUrl: 'data:image/jpeg;base64,/9j/',
+    context,
+    today: '2026-07-15',
+    safetyIdentifier: 'ledger_test',
+  });
+  assert.equal(result.draft.amount, 300);
+  assert.equal(result.draft.splitMode, 'custom');
+  assert.deepEqual(result.draft.customSplits, [
+    { memberId: 'me', memberName: '我', amount: 200 },
+    { memberId: 'ming', memberName: '小明', amount: 100 },
+  ]);
+
+  const conflictingProvider = await analyzeWithOpenAI({
+    client: { responses: { create: async () => receiptResponse({
+      amount: 300,
+      participantNames: ['我', '小明'],
+      splitMode: 'custom',
+      customSplits: [
+        { memberName: '我', amount: 150 },
+        { memberName: '小明', amount: 150 },
+      ],
+    }) } },
+    model: 'gpt-5.6-sol',
+    text: '晚餐 300，小明100、我200，我付',
+    receiptDataUrl: 'data:image/jpeg;base64,/9j/',
+    context,
+    today: '2026-07-15',
+    safetyIdentifier: 'ledger_test',
+  });
+  assert.deepEqual(conflictingProvider.draft.customSplits, [
+    { memberId: 'me', memberName: '我', amount: 200 },
+    { memberId: 'ming', memberName: '小明', amount: 100 },
+  ]);
+  assert.match(conflictingProvider.draft.warnings.join(' '), /已採用文字分帳/);
+});
+
+test('backfills reliable payer, category, and participants without stale warnings', async () => {
+  const responses = [
+    receiptResponse({
+      payerName: null,
+      category: null,
+      participantNames: [],
+      splitMode: 'equal',
+      expenseDate: null,
+      confidence: 0.95,
+    }),
+    receiptResponse({
+      description: '',
+      payerName: '小明',
+      category: '餐飲',
+      participantNames: ['我', '小明'],
+      splitMode: 'equal',
+      expenseDate: '2026-07-13',
+      confidence: 0.9,
+    }),
+  ];
+  const result = await analyzeWithOpenAI({
+    client: { responses: { create: async () => responses.shift() } },
+    model: 'gpt-5.6-sol',
+    text: '',
+    receiptDataUrl: 'data:image/jpeg;base64,/9j/',
+    context,
+    today: '2026-07-15',
+    safetyIdentifier: 'ledger_test',
+  });
+  assert.equal(result.draft.description, '晚餐');
+  assert.equal(result.draft.payerId, 'ming');
+  assert.equal(result.draft.category, '餐飲');
+  assert.deepEqual(result.draft.participantIds, ['me', 'ming']);
+  assert.equal(result.draft.splitMode, 'equal');
+  assert.doesNotMatch(result.draft.warnings.join(' '), /尚未辨識項目說明/);
+  assert.doesNotMatch(result.draft.warnings.join(' '), /付款／收款人.*暫設/);
+  assert.doesNotMatch(result.draft.warnings.join(' '), /分類.*暫設/);
+  assert.doesNotMatch(result.draft.warnings.join(' '), /分攤成員.*暫設/);
+});
+
+test('replaces invalid normalized fallback fields with reliable high-detail values', async () => {
+  const responses = [
+    receiptResponse({
+      payerName: '不存在',
+      category: '不存在',
+      participantNames: ['不存在'],
+      splitMode: 'equal',
+      expenseDate: null,
+      confidence: 0.95,
+    }),
+    receiptResponse({
+      description: '',
+      payerName: '小明',
+      category: '餐飲',
+      participantNames: ['我', '小明'],
+      splitMode: 'equal',
+      expenseDate: '2026-07-13',
+      confidence: 0.9,
+    }),
+  ];
+  const result = await analyzeWithOpenAI({
+    client: { responses: { create: async () => responses.shift() } },
+    model: 'gpt-5.6-sol',
+    text: '',
+    receiptDataUrl: 'data:image/jpeg;base64,/9j/',
+    context,
+    today: '2026-07-15',
+    safetyIdentifier: 'ledger_test',
+  });
+  assert.equal(result.draft.payerId, 'ming');
+  assert.equal(result.draft.category, '餐飲');
+  assert.deepEqual(result.draft.participantIds, ['me', 'ming']);
+  assert.doesNotMatch(result.draft.warnings.join(' '), /不存在/);
+});
+
+test('removes stale fallback warnings when a valid detailed draft is preferred', async () => {
+  const responses = [
+    receiptResponse({
+      isLedgerEntry: false,
+      description: '',
+      amount: null,
+      payerName: null,
+      category: null,
+      participantNames: [],
+      splitMode: 'equal',
+      confidence: 0.2,
+    }),
+    receiptResponse({
+      payerName: '小明',
+      category: '餐飲',
+      participantNames: ['我', '小明'],
+      splitMode: 'equal',
+      confidence: 0.95,
+    }),
+  ];
+  const result = await analyzeWithOpenAI({
+    client: { responses: { create: async () => responses.shift() } },
+    model: 'gpt-5.6-sol',
+    text: '',
+    receiptDataUrl: 'data:image/jpeg;base64,/9j/',
+    context,
+    today: '2026-07-15',
+    safetyIdentifier: 'ledger_test',
+  });
+  const warnings = result.draft.warnings.join(' ');
+  assert.equal(result.draft.confidence, 0.95);
+  assert.equal(result.draft.payerId, 'ming');
+  assert.doesNotMatch(warnings, /暫設|辨識信心較低/);
+});
+
+test('retries normalized receipt amounts that cannot be stored safely', async () => {
+  for (const invalidAmount of [120.123, 0.0000001, 1000000000000]) {
+    let requestCount = 0;
+    const responses = [
+      receiptResponse({ amount: invalidAmount, confidence: 0.95 }),
+      receiptResponse({ amount: 120, confidence: 0.95 }),
+    ];
+    const result = await analyzeWithOpenAI({
+      client: { responses: { create: async () => {
+        requestCount += 1;
+        return responses.shift();
+      } } },
+      model: 'gpt-5.6-sol',
+      text: '',
+      receiptDataUrl: 'data:image/jpeg;base64,/9j/',
+      context,
+      today: '2026-07-15',
+      safetyIdentifier: 'ledger_test',
+    });
+    assert.equal(requestCount, 2, String(invalidAmount));
+    assert.equal(result.draft.amount, 120, String(invalidAmount));
+  }
+});
+
+test('keeps the fast amount when high-detail evidence is explicitly unreliable', async () => {
+  const responses = [
+    receiptResponse({ amount: 120, confidence: 0.5, warnings: ['影像小字較模糊'] }),
+    receiptResponse({
+      amount: 130,
+      confidence: 0.1,
+      warnings: ['細節金額無法辨識'],
+    }),
+  ];
+  const client = { responses: { create: async () => responses.shift() } };
+  const result = await analyzeWithOpenAI({
+    client,
+    model: 'gpt-5.6-sol',
+    text: '',
+    receiptDataUrl: 'data:image/jpeg;base64,/9j/',
+    context,
+    today: '2026-07-15',
+    safetyIdentifier: 'ledger_test',
+  });
+  const warnings = result.draft.warnings.join(' ');
+
+  assert.equal(result.draft.amount, 120);
+  assert.match(warnings, /已保留快速結果/);
+  assert.match(warnings, /細節金額無法辨識/);
+});
+
+test('drops custom splits that no longer match a high-detail amount', async () => {
+  const responses = [
+    receiptResponse({
+      amount: 120,
+      participantNames: ['我', '小明'],
+      splitMode: 'custom',
+      customSplits: [
+        { memberName: '我', amount: 60 },
+        { memberName: '小明', amount: 60 },
+      ],
+      confidence: 0.5,
+      warnings: ['影像小字較模糊'],
+    }),
+    receiptResponse({ description: '', amount: 130, confidence: 0.7 }),
+  ];
+  const client = { responses: { create: async () => responses.shift() } };
+  const result = await analyzeWithOpenAI({
+    client,
+    model: 'gpt-5.6-sol',
+    text: '',
+    receiptDataUrl: 'data:image/jpeg;base64,/9j/',
+    context,
+    today: '2026-07-15',
+    safetyIdentifier: 'ledger_test',
+  });
+  const warnings = result.draft.warnings.join(' ');
+
+  assert.equal(result.draft.amount, 130);
+  assert.equal(result.draft.splitMode, 'equal');
+  assert.deepEqual(result.draft.customSplits, []);
+  assert.match(warnings, /自訂分攤與總額不符/);
+});
+
+test('uses matching high-detail custom splits with a high-detail amount', async () => {
+  const responses = [
+    receiptResponse({ amount: 120, confidence: 0.5, warnings: ['影像小字較模糊'] }),
+    receiptResponse({
+      description: '',
+      amount: 130,
+      participantNames: ['我', '小明'],
+      splitMode: 'custom',
+      customSplits: [
+        { memberName: '我', amount: 65 },
+        { memberName: '小明', amount: 65 },
+      ],
+      confidence: 0.7,
+    }),
+  ];
+  const client = { responses: { create: async () => responses.shift() } };
+  const result = await analyzeWithOpenAI({
+    client,
+    model: 'gpt-5.6-sol',
+    text: '',
+    receiptDataUrl: 'data:image/jpeg;base64,/9j/',
+    context,
+    today: '2026-07-15',
+    safetyIdentifier: 'ledger_test',
+  });
+
+  assert.equal(result.draft.amount, 130);
+  assert.equal(result.draft.splitMode, 'custom');
+  assert.deepEqual(result.draft.customSplits, [
+    { memberId: 'me', memberName: '我', amount: 65 },
+    { memberId: 'ming', memberName: '小明', amount: 65 },
+  ]);
+
+  const customResponses = [
+    receiptResponse({
+      amount: 120,
+      participantNames: ['我', '小明'],
+      splitMode: 'custom',
+      customSplits: [
+        { memberName: '我', amount: 60 },
+        { memberName: '小明', amount: 60 },
+      ],
+      confidence: 0.5,
+    }),
+    receiptResponse({
+      amount: 130,
+      participantNames: ['我', '小明'],
+      splitMode: 'custom',
+      customSplits: [
+        { memberName: '我', amount: 65 },
+        { memberName: '小明', amount: 65 },
+      ],
+      confidence: 0.8,
+    }),
+  ];
+  const customToCustom = await analyzeWithOpenAI({
+    client: { responses: { create: async () => customResponses.shift() } },
+    model: 'gpt-5.6-sol',
+    text: '',
+    receiptDataUrl: 'data:image/jpeg;base64,/9j/',
+    context,
+    today: '2026-07-15',
+    safetyIdentifier: 'ledger_test',
+  });
+  assert.equal(customToCustom.draft.amount, 130);
+  assert.equal(customToCustom.draft.splitMode, 'custom');
+  assert.deepEqual(customToCustom.draft.customSplits, [
+    { memberId: 'me', memberName: '我', amount: 65 },
+    { memberId: 'ming', memberName: '小明', amount: 65 },
+  ]);
+});
+
+test('preserves specific provider warnings when resolved system warnings are removed', async () => {
+  const responses = [
+    receiptResponse({
+      amount: 120,
+      confidence: 0.5,
+      warnings: [
+        '尚未辨識金額末位數，120 僅為暫估',
+        '尚未辨識單據日期年份，2026-07-14 僅為暫估',
+      ],
+    }),
+    receiptResponse({ description: '', amount: null, confidence: 0.4 }),
+  ];
+  const client = { responses: { create: async () => responses.shift() } };
+  const result = await analyzeWithOpenAI({
+    client,
+    model: 'gpt-5.6-sol',
+    text: '',
+    receiptDataUrl: 'data:image/jpeg;base64,/9j/',
+    context,
+    today: '2026-07-15',
+    safetyIdentifier: 'ledger_test',
+  });
+  const warnings = result.draft.warnings.join(' ');
+
+  assert.match(warnings, /金額末位數/);
+  assert.match(warnings, /日期年份/);
+
+  const fieldResponses = [
+    receiptResponse({
+      payerName: null,
+      category: null,
+      participantNames: [],
+      splitMode: 'equal',
+      expenseDate: null,
+      confidence: 0.95,
+      warnings: [
+        '尚未辨識付款／收款人姓名末字，請人工確認',
+        '尚未辨識分類細項，請人工確認',
+        '尚未辨識分攤成員姓名末字，請人工確認',
+      ],
+    }),
+    receiptResponse({
+      description: '',
+      payerName: '小明',
+      category: '餐飲',
+      participantNames: ['我', '小明'],
+      splitMode: 'equal',
+      expenseDate: '2026-07-13',
+      confidence: 0.9,
+    }),
+  ];
+  const fields = await analyzeWithOpenAI({
+    client: { responses: { create: async () => fieldResponses.shift() } },
+    model: 'gpt-5.6-sol',
+    text: '',
+    receiptDataUrl: 'data:image/jpeg;base64,/9j/',
+    context,
+    today: '2026-07-15',
+    safetyIdentifier: 'ledger_test',
+  });
+  const fieldWarnings = fields.draft.warnings.join(' ');
+  assert.match(fieldWarnings, /付款／收款人姓名末字/);
+  assert.match(fieldWarnings, /分類細項/);
+  assert.match(fieldWarnings, /分攤成員姓名末字/);
 });
 
 test('preserves token usage when an OpenAI response cannot be parsed', async () => {

@@ -53,12 +53,15 @@ class FakeElement {
 
   setAttribute(name, value) { this.attributes.set(name, String(value)); }
   removeAttribute(name) { this.attributes.delete(name); }
-  focus() { this.ownerDocument.activeElement = this; }
+  focus() {
+    this.ownerDocument.activeElement = this;
+    this.ownerDocument.focusHistory.push(this);
+  }
   select() { this.selected = true; }
 }
 
 function createDialogEnvironment() {
-  const document = { activeElement: null };
+  const document = { activeElement: null, focusHistory: [] };
   const elements = Object.fromEntries([
     'form', 'title', 'message', 'promptWrap', 'promptLabel', 'promptInput',
     'error', 'cancelButton', 'confirmButton', 'closeButton',
@@ -81,7 +84,12 @@ function createDialogEnvironment() {
   const dialog = new FakeElement(document);
   dialog.open = false;
   dialog.querySelector = (selector) => selectors[selector];
-  dialog.showModal = () => { dialog.open = true; };
+  dialog.showModal = () => {
+    dialog.open = true;
+    const target = Object.values(elements).find((element) => element.attributes.has('autofocus'))
+      || elements.closeButton;
+    target.focus();
+  };
   dialog.close = () => { dialog.open = false; };
 
   const body = new FakeElement(document);
@@ -112,6 +120,7 @@ test('shared dialog safely ignores duplicate opens and restores focus', async ()
   assert.equal(env.dialog.open, true);
   assert.equal(env.body.dataset.dialogLocks, '1');
   assert.equal(env.body.classList.contains('app-dialog-open'), true);
+  assert.equal(env.cancelButton.ownerDocument.focusHistory[0], env.cancelButton);
   assert.equal(env.cancelButton.ownerDocument.activeElement, env.cancelButton);
   assert.equal(await env.AppDialog.confirm({ title: '重複操作' }), false);
 
@@ -127,14 +136,19 @@ test('prompt keeps required validation inside the shared dialog', async () => {
   const env = createDialogEnvironment();
   const result = env.AppDialog.prompt({ title: '新增類別', label: '類別名稱' });
 
+  assert.equal(env.form.noValidate, true);
+  assert.equal(env.promptInput.ownerDocument.focusHistory[0], env.promptInput);
+  assert.equal(env.promptInput.attributes.get('aria-required'), 'true');
   env.form.dispatch('submit');
   assert.equal(env.dialog.open, true);
   assert.equal(env.promptInput.attributes.get('aria-invalid'), 'true');
+  assert.equal(env.promptInput.attributes.get('aria-errormessage'), 'app-dialog-error');
   assert.equal(env.error.classList.contains('hidden'), false);
 
   env.promptInput.value = '咖啡';
   env.promptInput.dispatch('input');
   assert.equal(env.promptInput.attributes.has('aria-invalid'), false);
+  assert.equal(env.promptInput.attributes.has('aria-errormessage'), false);
   env.form.dispatch('submit');
   assert.equal(await result, '咖啡');
   assert.equal(env.dialog.open, false);

@@ -14,6 +14,9 @@
   const cancelButton = dialog.querySelector('#app-dialog-cancel');
   const confirmButton = dialog.querySelector('#app-dialog-confirm');
   const closeButton = dialog.querySelector('#app-dialog-close');
+  const focusTargets = [promptInput, cancelButton, confirmButton];
+
+  form.noValidate = true;
 
   let active = null;
   let backdropPointerDown = false;
@@ -30,15 +33,18 @@
     const session = active;
     session.settling = true;
     dialog.classList.add('closing');
+    const closeDelay = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches ? 0 : 150;
     setTimeout(() => {
       if (dialog.open) dialog.close();
       dialog.classList.remove('closing');
       dialog.removeAttribute('data-tone');
+      focusTargets.forEach((target) => target.removeAttribute('autofocus'));
+      promptInput.removeAttribute('aria-errormessage');
       setBodyLock(false);
       active = null;
       if (session.returnFocus?.isConnected) session.returnFocus.focus({ preventScroll: true });
       session.resolve(value);
-    }, 150);
+    }, closeDelay);
   }
 
   function submit() {
@@ -47,6 +53,7 @@
       const value = promptInput.value.trim();
       if (active.required && !value) {
         promptInput.setAttribute('aria-invalid', 'true');
+        promptInput.setAttribute('aria-errormessage', 'app-dialog-error');
         error.textContent = active.requiredMessage;
         error.classList.remove('hidden');
         promptInput.focus();
@@ -63,6 +70,10 @@
     const returnFocus = document.activeElement;
     const isPrompt = mode === 'prompt';
     const tone = options.tone === 'danger' ? 'danger' : 'default';
+    const required = isPrompt && options.required !== false;
+    const initialFocus = isPrompt
+      ? promptInput
+      : tone === 'danger' ? cancelButton : confirmButton;
 
     title.textContent = options.title || (isPrompt ? '輸入資料' : '確認操作');
     message.textContent = options.message || '';
@@ -74,7 +85,11 @@
     promptInput.value = isPrompt ? String(options.value || '') : '';
     promptInput.placeholder = options.placeholder || '';
     promptInput.maxLength = Number.isInteger(options.maxLength) ? options.maxLength : 200;
+    promptInput.required = required;
+    if (required) promptInput.setAttribute('aria-required', 'true');
+    else promptInput.removeAttribute('aria-required');
     promptInput.removeAttribute('aria-invalid');
+    promptInput.removeAttribute('aria-errormessage');
     error.textContent = '';
     error.classList.add('hidden');
     cancelButton.textContent = options.cancelLabel || '取消';
@@ -83,6 +98,8 @@
     confirmButton.classList.toggle('btn-primary', tone !== 'danger');
     dialog.dataset.tone = tone;
 
+    focusTargets.forEach((target) => target.removeAttribute('autofocus'));
+    initialFocus.setAttribute('autofocus', '');
     dialog.showModal();
     setBodyLock(true);
 
@@ -91,18 +108,12 @@
         mode,
         resolve,
         returnFocus,
-        required: options.required !== false,
+        required,
         requiredMessage: options.requiredMessage || '請輸入內容',
       };
       requestAnimationFrame(() => {
-        if (isPrompt) {
-          promptInput.focus({ preventScroll: true });
-          promptInput.select();
-        } else if (tone === 'danger') {
-          cancelButton.focus({ preventScroll: true });
-        } else {
-          confirmButton.focus({ preventScroll: true });
-        }
+        initialFocus.focus({ preventScroll: true });
+        if (isPrompt) promptInput.select();
       });
     });
   }
@@ -132,6 +143,7 @@
   promptInput.addEventListener('input', () => {
     if (!promptInput.value.trim()) return;
     promptInput.removeAttribute('aria-invalid');
+    promptInput.removeAttribute('aria-errormessage');
     error.textContent = '';
     error.classList.add('hidden');
   });

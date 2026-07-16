@@ -60,7 +60,8 @@ test('shared dialogs replace native confirm and prompt calls', () => {
     assert.match(page, /id="app-dialog-title"/);
     assert.match(page, /id="app-dialog-message"/);
     assert.match(page, /id="app-dialog-confirm"/);
-    assert.match(page, /src="ui-dialog\.js\?v=1"/);
+    assert.match(page, /id="app-dialog-form" class="app-dialog__form" novalidate/);
+    assert.match(page, /src="ui-dialog\.js\?v=2"/);
   }
 });
 
@@ -70,6 +71,8 @@ test('expense sheet, receipt viewer, and native selects use the current UI primi
   assert.match(html, /<select id="exp-payer" class="app-select">/);
   assert.match(html, /<select id="exp-transfer-to" class="app-select">/);
   assert.match(html, /id="exp-categories"[^>]+role="group"[^>]+aria-labelledby="label-cats"/);
+  assert.match(html, /id="ai-review-status"[^>]+role="status"/);
+  assert.match(html, /id="modal-toast"[^>]+role="status"/);
 });
 
 test('static admin ID lookups resolve in the admin document', () => {

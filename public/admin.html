@@ -7,7 +7,7 @@
   <meta name="theme-color" content="#f5f3ee" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#191813" media="(prefers-color-scheme: dark)">
   <title>管理面板 — 分帳小工具</title>
-  <link rel="stylesheet" href="style.css?v=32">
+  <link rel="stylesheet" href="style.css?v=33">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%2344705a'/><text x='50' y='72' font-size='60' text-anchor='middle' fill='white' font-family='Helvetica,Arial,sans-serif' font-weight='bold'>$</text></svg>">
 </head>
 <body>
@@ -112,7 +112,7 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
         </button>
       </header>
-      <form id="app-dialog-form" class="app-dialog__form">
+      <form id="app-dialog-form" class="app-dialog__form" novalidate>
         <div class="app-dialog__body">
           <p id="app-dialog-message" class="app-dialog__message"></p>
           <label id="app-dialog-prompt-wrap" class="app-dialog__prompt hidden">
@@ -131,7 +131,7 @@
 
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
-  <script src="ui-dialog.js?v=1"></script>
-  <script src="admin.js?v=11"></script>
+  <script src="ui-dialog.js?v=2"></script>
+  <script src="admin.js?v=12"></script>
 </body>
 </html>

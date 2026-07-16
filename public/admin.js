@@ -284,7 +284,7 @@ function renderTrash() {
       const exp = overview.deleted.find((e) => e.id === li.dataset.id);
       if (!await AppDialog.confirm({
         title: '永久刪除帳目',
-        message: `「${exp.description}」將無法復原，確定要永久刪除？`,
+        message: `「${exp.description}」｜${exp.expense_date}｜${exp.payer_name} ${fmt(exp.amount)}。刪除後將無法復原。`,
         confirmLabel: '永久刪除',
         tone: 'danger',
       })) return;

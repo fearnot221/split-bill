@@ -38,6 +38,7 @@ const readOpenAiApiKeyFile = (filename) => {
   return key;
 };
 const PORT = process.env.PORT || 3000;
+const HOST = process.env.HOST || '127.0.0.1';
 const APP_USERNAME = process.env.APP_USERNAME || 'ledger';
 const APP_PASSWORD = process.env.APP_PASSWORD || '';
 const ALLOW_PUBLIC_ACCESS = process.env.ALLOW_PUBLIC_ACCESS === '1';
@@ -102,6 +103,11 @@ app.use((req, res, next) => {
     res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   }
   next();
+});
+
+app.get('/healthz', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.type('text/plain').send('ok');
 });
 
 // 正式對外時可用環境變數替整站加上共享密碼，不影響本機免登入使用。
@@ -1214,8 +1220,8 @@ app.use((err, req, res, next) => {
 });
 
 if (require.main === module) {
-  app.listen(PORT, () => {
-    console.log(`分帳 App 已啟動： http://localhost:${PORT}`);
+  app.listen(PORT, HOST, () => {
+    console.log(`分帳 App 已啟動： http://${HOST}:${PORT}`);
   });
 }
 

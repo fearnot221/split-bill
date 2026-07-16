@@ -111,3 +111,128 @@ test('falls back to an editable local draft when OpenAI is unavailable', async (
   assert.ok(upstreamBodies.every((requestBody) => !requestBody.safety_identifier.includes(safetySessionId)));
   assert.ok(upstreamBodies.every((requestBody) => requestBody.input[0].content[1].detail === 'low'));
 });
+
+test('keeps the low-detail receipt draft when the total analysis deadline stops high detail', async (t) => {
+  const upstreamBodies = [];
+  const sockets = new Set();
+  const upstream = http.createServer((req, res) => {
+    const chunks = [];
+    req.on('data', (chunk) => chunks.push(chunk));
+    req.on('end', () => {
+      const requestBody = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      upstreamBodies.push(requestBody);
+      if (upstreamBodies.length > 1) return;
+      const draft = {
+        isLedgerEntry: true,
+        kind: 'expense',
+        description: '夜市晚餐',
+        amount: 486,
+        category: '餐飲',
+        expenseDate: '2026-07-12',
+        payerName: '我',
+        participantNames: ['我'],
+        splitMode: 'none',
+        customSplits: [],
+        transferToName: null,
+        note: null,
+        confidence: 0.5,
+        warnings: ['影像小字較模糊'],
+      };
+      const responseBody = JSON.stringify({
+        id: 'resp_low_detail',
+        object: 'response',
+        created_at: Math.floor(Date.now() / 1000),
+        status: 'completed',
+        model: 'gpt-5.6-sol',
+        output: [{
+          id: 'msg_low_detail',
+          type: 'message',
+          status: 'completed',
+          role: 'assistant',
+          content: [{
+            type: 'output_text',
+            text: JSON.stringify(draft),
+            annotations: [],
+          }],
+        }],
+        output_text: JSON.stringify(draft),
+        usage: {
+          input_tokens: 100,
+          input_tokens_details: { cached_tokens: 0 },
+          output_tokens: 20,
+          total_tokens: 120,
+        },
+      });
+      setTimeout(() => {
+        if (res.destroyed) return;
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(responseBody);
+      }, 200);
+    });
+  });
+  upstream.on('connection', (socket) => {
+    sockets.add(socket);
+    socket.once('close', () => sockets.delete(socket));
+  });
+  const upstreamPort = await listen(upstream);
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'split-bill-ai-deadline-'));
+  const keyFile = path.join(tempDir, 'auth.json');
+  await fs.writeFile(keyFile, JSON.stringify({ OPENAI_API_KEY: 'test-key' }), { mode: 0o600 });
+  const child = spawn(process.execPath, ['-e', [
+    "const app = require('./server')",
+    "const server = app.listen(0, '127.0.0.1', () => console.log('READY ' + server.address().port))",
+  ].join(';')], {
+    cwd: path.join(__dirname, '..'),
+    env: {
+      ...process.env,
+      NODE_ENV: 'test',
+      DB_PATH: path.join(tempDir, 'data.db'),
+      UPLOAD_DIR: path.join(tempDir, 'uploads'),
+      OPENAI_API_KEY: '',
+      OPENAI_API_KEY_FILE: keyFile,
+      OPENAI_BASE_URL: `http://127.0.0.1:${upstreamPort}/v1`,
+      OPENAI_MODEL: 'gpt-5.6-sol',
+      OPENAI_TIMEOUT_MS: '500',
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+
+  t.after(async () => {
+    child.kill('SIGTERM');
+    await new Promise((resolve) => child.once('exit', resolve));
+    sockets.forEach((socket) => socket.destroy());
+    await new Promise((resolve) => upstream.close(resolve));
+    await fs.rm(tempDir, { recursive: true, force: true });
+  });
+
+  const port = await waitForReady(child);
+  const me = await fetch(`http://127.0.0.1:${port}/api/me`).then((response) => response.json());
+  const receipt = Buffer.from([0xff, 0xd8, 0xff, 0xd9]).toString('base64');
+  const startedAt = Date.now();
+  const response = await fetch(`http://127.0.0.1:${port}/api/groups/${me.groupId}/ai/parse`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      text: '',
+      receiptDataUrl: `data:image/jpeg;base64,${receipt}`,
+      defaultMemberId: me.memberId,
+      localDate: '2026-07-14',
+    }),
+  });
+  const elapsedMs = Date.now() - startedAt;
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.provider, 'openai', JSON.stringify({ body, attempts: upstreamBodies.length }));
+  assert.equal(body.model, 'gpt-5.6-sol');
+  assert.equal(body.draft.amount, 486);
+  assert.equal(body.draft.expenseDate, '2026-07-12');
+  assert.equal(body.draft.ready, true);
+  assert.match(body.notices.join(' '), /單據細節確認時間較長/);
+  assert.ok(elapsedMs >= 400, `deadline returned too early: ${elapsedMs}ms`);
+  assert.ok(elapsedMs < 650, `total deadline was not applied: ${elapsedMs}ms`);
+  assert.deepEqual(
+    upstreamBodies.map((requestBody) => requestBody.input[0].content[1].detail),
+    ['low', 'high']
+  );
+});

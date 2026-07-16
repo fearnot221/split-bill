@@ -55,6 +55,15 @@ test('API protects access, validates money, and rejects stale updates', async (t
   let memberId;
   let expenseId;
 
+  await t.test('exposes a minimal unauthenticated health probe', async () => {
+    const response = await fetch(`${baseUrl}/healthz`);
+    assert.equal(response.status, 200);
+    assert.equal(await response.text(), 'ok');
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+    assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
+    assert.equal(response.headers.get('x-powered-by'), null);
+  });
+
   await t.test('requires the optional whole-app password', async () => {
     const response = await fetch(`${baseUrl}/api/me`);
     assert.equal(response.status, 401);

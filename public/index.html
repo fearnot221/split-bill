@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#f5f3ee" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#191813" media="(prefers-color-scheme: dark)">
   <title>分帳小工具 — 記帳分帳</title>
-  <link rel="stylesheet" href="style.css?v=32">
+  <link rel="stylesheet" href="style.css?v=33">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%2344705a'/><text x='50' y='72' font-size='60' text-anchor='middle' fill='white' font-family='Helvetica,Arial,sans-serif' font-weight='bold'>$</text></svg>">
 </head>
 <body>
@@ -71,7 +71,11 @@
           <div id="smart-participants" class="smart-participants">
             <div class="smart-participants-head">
               <span id="smart-participants-label">分帳對象 <small>選填</small></span>
-              <button type="button" id="btn-smart-participants-clear" class="pill-btn hidden">清除</button>
+              <span class="smart-participants-actions">
+                <button type="button" id="btn-smart-participants-more" class="pill-btn hidden"
+                  aria-expanded="false" aria-controls="smart-participant-list">更多</button>
+                <button type="button" id="btn-smart-participants-clear" class="pill-btn hidden">清除</button>
+              </span>
             </div>
             <div id="smart-participant-list" class="smart-participant-list"
               role="group" aria-labelledby="smart-participants-label"></div>
@@ -118,7 +122,7 @@
             </button>
           </div>
           <div id="filter-options" class="filter-options">
-            <div class="seg filter-kind" id="filter-kind" aria-label="紀錄類型">
+            <div class="seg filter-kind" id="filter-kind" role="group" aria-label="紀錄類型">
               <button type="button" class="seg-btn active" data-kind="all" aria-pressed="true">全部</button>
               <button type="button" class="seg-btn" data-kind="expense" aria-pressed="false">支出</button>
               <button type="button" class="seg-btn" data-kind="income" aria-pressed="false">收入</button>
@@ -232,14 +236,16 @@
         </button>
       </div>
       <form id="form-expense">
-        <div class="seg kind-seg" aria-label="紀錄類型">
+        <div class="seg kind-seg" role="group" aria-label="紀錄類型">
           <button type="button" id="kind-expense" class="seg-btn active" aria-pressed="true">支出</button>
           <button type="button" id="kind-income" class="seg-btn" aria-pressed="false">收入</button>
           <button type="button" id="kind-transfer" class="seg-btn" aria-pressed="false">轉帳</button>
         </div>
-        <div id="ai-review" class="ai-review hidden" role="status">
-          <div id="ai-review-title" class="ai-review-title"></div>
-          <p id="ai-review-summary" class="ai-review-summary"></p>
+        <div id="ai-review" class="ai-review hidden" role="region" aria-labelledby="ai-review-title">
+          <div id="ai-review-title" class="ai-review-title" tabindex="-1"></div>
+          <p id="ai-review-status" class="visually-hidden" role="status"
+            aria-live="polite" aria-atomic="true"></p>
+          <div id="ai-review-summary" class="ai-review-summary"></div>
           <ul id="ai-review-warnings"></ul>
         </div>
         <label>項目說明
@@ -263,7 +269,7 @@
         </label>
         <div class="split-header">
           <label>分攤方式</label>
-          <div class="seg" aria-label="分攤方式">
+          <div class="seg" role="group" aria-label="分攤方式">
             <button type="button" id="split-equal" class="seg-btn active" aria-pressed="true">均分</button>
             <button type="button" id="split-custom" class="seg-btn" aria-pressed="false">自訂金額</button>
             <button type="button" id="split-none" class="seg-btn" aria-pressed="false">不分攤</button>
@@ -293,6 +299,7 @@
         <button type="button" id="btn-delete-expense" class="btn btn-ghost danger hidden">刪除</button>
       </div>
     </section>
+    <div id="modal-toast" class="toast hidden" role="status" aria-live="polite" aria-atomic="true"></div>
   </dialog>
 
   <dialog id="receipt-lightbox" class="app-dialog app-dialog--viewer receipt-lightbox" aria-label="單據預覽">
@@ -312,7 +319,7 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
         </button>
       </header>
-      <form id="app-dialog-form" class="app-dialog__form">
+      <form id="app-dialog-form" class="app-dialog__form" novalidate>
         <div class="app-dialog__body">
           <p id="app-dialog-message" class="app-dialog__message"></p>
           <label id="app-dialog-prompt-wrap" class="app-dialog__prompt hidden">
@@ -331,7 +338,7 @@
 
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
-  <script src="ui-dialog.js?v=1"></script>
-  <script src="app.js?v=52"></script>
+  <script src="ui-dialog.js?v=2"></script>
+  <script src="app.js?v=53"></script>
 </body>
 </html>
