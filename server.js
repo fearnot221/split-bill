@@ -47,6 +47,9 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY
 const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-5.6-sol';
 const OPENAI_TIMEOUT_MS = positiveIntegerEnv(process.env.OPENAI_TIMEOUT_MS, 30_000);
 const AI_REQUESTS_PER_HOUR = positiveIntegerEnv(process.env.AI_REQUESTS_PER_HOUR, 30);
+const MAINTENANCE_FILE = process.env.MAINTENANCE_FILE
+  ? path.resolve(process.env.MAINTENANCE_FILE)
+  : '';
 
 if (APP_USERNAME.includes(':') || /[\r\n]/.test(APP_USERNAME)) {
   throw new Error('APP_USERNAME cannot contain a colon or line break');
@@ -108,6 +111,16 @@ app.use((req, res, next) => {
 app.get('/healthz', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   res.type('text/plain').send('ok');
+});
+
+app.use((req, res, next) => {
+  if (!MAINTENANCE_FILE || !fs.existsSync(MAINTENANCE_FILE)) return next();
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Retry-After', '30');
+  if (req.path === '/api' || req.path.startsWith('/api/')) {
+    return res.status(503).json({ error: '服務更新中，請稍後再試' });
+  }
+  return res.status(503).type('text/plain').send('Service temporarily unavailable');
 });
 
 // 正式對外時可用環境變數替整站加上共享密碼，不影響本機免登入使用。

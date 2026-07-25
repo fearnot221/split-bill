@@ -156,6 +156,8 @@ WantedBy=multi-user.target
 
 在 `/etc/split-bill.env` 設定 `APP_USERNAME` 與 `APP_PASSWORD`，並限制檔案權限。對外可使用 Cloudflare Tunnel 或 Nginx/Caddy；只有在應用程式前方確實只有一層可信任代理時才設定 `TRUST_PROXY=1`，讓 HTTPS session cookie 與來源 IP 判斷正確。
 
+目前 `pi-2` 正式環境採用 Docker、GitHub HMAC webhook 與 systemd timer 雙重觸發。新 commit 會先執行完整測試、建立資料快照，並用快照副本預檢 migration；正式健康檢查失敗時會自動回復上一個 image、資料庫與單據。設定與驗證方式見 [`deploy/pi2/README.md`](deploy/pi2/README.md)。
+
 ## 驗證
 
 ```bash

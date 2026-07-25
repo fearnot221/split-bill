@@ -1,0 +1,14 @@
+.git
+.github
+.DS_Store
+.env
+.env.*
+codex
+node_modules
+data.db
+data.db-*
+uploads
+backups
+coverage
+*.log
+deploy

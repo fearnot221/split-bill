@@ -1,0 +1,13 @@
+[Unit]
+Description=Periodically reconcile split-bill with GitHub main
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=3min
+RandomizedDelaySec=20s
+AccuracySec=15s
+Persistent=true
+Unit=split-bill-sync.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,16 @@
+[Unit]
+Description=Fetch, verify, and deploy the latest split-bill main branch
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/var/run/docker.sock
+
+[Service]
+Type=oneshot
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/fearnot/projects/split-bill/deploy/pi2/split-bill-deploy.sh
+TimeoutStartSec=45min
+TimeoutStopSec=5min
+UMask=0077
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7

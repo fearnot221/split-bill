@@ -30,6 +30,7 @@ test.before(async () => {
   tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'split-bill-api-'));
   process.env.DB_PATH = path.join(tempDir, 'data.db');
   process.env.UPLOAD_DIR = path.join(tempDir, 'uploads');
+  process.env.MAINTENANCE_FILE = path.join(tempDir, '.maintenance');
   process.env.APP_USERNAME = 'tester';
   process.env.APP_PASSWORD = 'access-secret';
   process.env.NODE_ENV = 'test';
@@ -62,6 +63,26 @@ test('API protects access, validates money, and rejects stale updates', async (t
     assert.equal(response.headers.get('cache-control'), 'no-store');
     assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
     assert.equal(response.headers.get('x-powered-by'), null);
+  });
+
+  await t.test('gates requests during deployment without blocking health checks', async () => {
+    await fs.writeFile(process.env.MAINTENANCE_FILE, 'test\n', { mode: 0o600 });
+    try {
+      const health = await fetch(`${baseUrl}/healthz`);
+      assert.equal(health.status, 200);
+      assert.equal(await health.text(), 'ok');
+
+      const api = await request('/api/me');
+      assert.equal(api.response.status, 503);
+      assert.equal(api.response.headers.get('retry-after'), '30');
+      assert.match(api.body.error, /更新中/);
+
+      const page = await fetch(`${baseUrl}/`, { headers: { Authorization: basicAuth } });
+      assert.equal(page.status, 503);
+      assert.equal(page.headers.get('cache-control'), 'no-store');
+    } finally {
+      await fs.rm(process.env.MAINTENANCE_FILE, { force: true });
+    }
   });
 
   await t.test('requires the optional whole-app password', async () => {

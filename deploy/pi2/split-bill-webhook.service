@@ -1,0 +1,23 @@
+[Unit]
+Description=Receive authenticated GitHub push events for split-bill
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/split-bill-webhook/env
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+Environment=WEBHOOK_HOST=192.168.1.120
+Environment=WEBHOOK_PORT=3200
+Environment=REPO_DIR=/home/fearnot/projects/split-bill
+Environment=COMPOSE_PROJECT_DIR=/home/fearnot/projects/split-bill-docker
+Environment=DEPLOY_SCRIPT=/home/fearnot/projects/split-bill/deploy/pi2/split-bill-deploy.sh
+WorkingDirectory=/home/fearnot/projects/split-bill
+ExecStart=/home/fearnot/tools/node-v24.16.0-linux-arm64/bin/node /home/fearnot/projects/split-bill/deploy/pi2/split-bill-webhook.js
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+UMask=0077
+
+[Install]
+WantedBy=default.target

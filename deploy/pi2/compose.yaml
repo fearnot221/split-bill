@@ -1,0 +1,31 @@
+services:
+  split-bill:
+    image: "${SPLIT_BILL_IMAGE:-split-bill-app:bootstrap}"
+    container_name: split-bill
+    restart: unless-stopped
+    init: true
+    env_file:
+      - /home/fearnot/projects/split-bill/.env
+    environment:
+      PORT: "3100"
+      HOST: "0.0.0.0"
+      DB_PATH: /data/data.db
+      UPLOAD_DIR: /data/uploads
+      BACKUP_DIR: /data/backups
+      MAINTENANCE_FILE: /data/.maintenance
+      ALLOW_PUBLIC_ACCESS: "1"
+      TRUST_PROXY: "1"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    volumes:
+      - /home/fearnot/projects/split-bill-docker/runtime:/data
+      - /home/fearnot/projects/split-bill/codex:/app/codex:ro
+    ports:
+      - "192.168.1.120:3100:3100"
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
