@@ -13,7 +13,7 @@ const {
 const members = [
   { id: 'alice', name: 'Alice' },
   { id: 'bob', name: 'Bob' },
-  { id: 'fund', name: '公帳', is_fund: 1 },
+  { id: 'charlie', name: 'Charlie' },
 ];
 
 function expense(overrides) {
@@ -56,7 +56,7 @@ test('calculates expense balances and spending total in cents', () => {
   const ledger = calculateLedger(members, [expense()]);
 
   assert.deepEqual(ledger, {
-    balancesCents: { alice: 500, bob: -500, fund: 0 },
+    balancesCents: { alice: 500, bob: -500, charlie: 0 },
     totalExpenseCents: 1000,
     totalIncomeCents: 0,
   });
@@ -69,7 +69,7 @@ test('reverses the balance direction for income', () => {
   })]);
 
   assert.deepEqual(ledger, {
-    balancesCents: { alice: -500, bob: 500, fund: 0 },
+    balancesCents: { alice: -500, bob: 500, charlie: 0 },
     totalExpenseCents: 0,
     totalIncomeCents: 1000,
   });
@@ -82,30 +82,30 @@ test('treats a transfer as balance movement, not spending', () => {
   })]);
 
   assert.deepEqual(ledger, {
-    balancesCents: { alice: 1000, bob: -1000, fund: 0 },
+    balancesCents: { alice: 1000, bob: -1000, charlie: 0 },
     totalExpenseCents: 0,
     totalIncomeCents: 0,
   });
 });
 
-test('uses the normal transfer semantics for the public fund', () => {
-  const deposit = expense({
+test('uses normal transfer semantics alongside a shared expense', () => {
+  const transfer = expense({
     amount: '20.00',
     category: '轉帳',
-    splits: [{ member_id: 'fund', amount: '20.00' }],
+    splits: [{ member_id: 'charlie', amount: '20.00' }],
   });
-  const fundPurchase = expense({
-    payer_id: 'fund',
+  const sharedExpense = expense({
+    payer_id: 'charlie',
     amount: '6.00',
     splits: [
       { member_id: 'alice', amount: '3.00' },
       { member_id: 'bob', amount: '3.00' },
     ],
   });
-  const ledger = calculateLedger(members, [deposit, fundPurchase]);
+  const ledger = calculateLedger(members, [transfer, sharedExpense]);
 
   assert.deepEqual(ledger, {
-    balancesCents: { alice: 1700, bob: -300, fund: -1400 },
+    balancesCents: { alice: 1700, bob: -300, charlie: -1400 },
     totalExpenseCents: 600,
     totalIncomeCents: 0,
   });
@@ -122,7 +122,7 @@ test('preserves money across a mixed ledger and its settlements', () => {
     expense({ amount: '10.01', splits: [
       { member_id: 'alice', amount: '3.34' },
       { member_id: 'bob', amount: '3.34' },
-      { member_id: 'fund', amount: '3.33' },
+      { member_id: 'charlie', amount: '3.33' },
     ] }),
     expense({
       payer_id: 'bob',
@@ -141,7 +141,7 @@ test('preserves money across a mixed ledger and its settlements', () => {
     settled[settlement.from] += settlement.amountCents;
     settled[settlement.to] -= settlement.amountCents;
   }
-  assert.deepEqual(settled, { alice: 0, bob: 0, fund: 0 });
+  assert.deepEqual(settled, { alice: 0, bob: 0, charlie: 0 });
 });
 
 test('rejects a split that does not conserve the expense amount', () => {

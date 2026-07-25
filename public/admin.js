@@ -168,8 +168,8 @@ async function reloadPanel(successMessage) {
 function renderMembers() {
   $('#admin-members').innerHTML = overview.members.map((m) => {
     const records = m.paid_count + m.split_count;
-    const deleteReason = m.is_fund
-      ? '公帳為系統帳戶，無法刪除'
+    const deleteReason = overview.members.length <= 1
+      ? '帳本至少需要保留一位成員'
       : records > 0 ? '有帳務紀錄，無法刪除' : '';
     const deleteState = deleteReason
       ? `aria-disabled="true" aria-label="刪除：${escapeHtml(deleteReason)}" data-disabled-reason="${escapeHtml(deleteReason)}"`
@@ -178,7 +178,6 @@ function renderMembers() {
       <li data-id="${m.id}">
         <span class="member-name-row">
           ${escapeHtml(m.name)}
-          ${m.is_fund ? '<span class="member-tag">公帳</span>' : ''}
           <span class="member-tag">${records} 筆紀錄</span>
         </span>
         <span class="admin-actions">

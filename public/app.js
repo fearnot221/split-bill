@@ -296,13 +296,19 @@ function renderAll() {
 
   $('#group-name').textContent = group.name;
   const exampleMembers = members
-    .filter((member) => !member.is_fund && member.id !== state.memberId)
+    .filter((member) => member.id !== state.memberId)
     .slice(0, 2)
     .map((member) => member.name);
   $('#smart-input').placeholder = exampleMembers.length
     ? `例如：昨天晚餐 1,280，我付，我跟${exampleMembers.join('、')}均分`
     : '例如：昨天晚餐 320，我付，不分攤';
   document.title = `${group.name} — 分帳小工具`;
+  const transferAvailable = hasTransferRecipient(members);
+  $('#kind-transfer').classList.toggle('hidden', !transferAvailable);
+  $('#kind-transfer').disabled = !transferAvailable;
+  if (transferAvailable && !$('#smart-add-member').classList.contains('hidden')) {
+    setSmartFeedback('');
+  }
 
   // 摘要列：整本帳的總支出／總收入／淨額（一趟旅行一本帳，不以月份切分）
   const { totalIncome } = state.data;
@@ -452,16 +458,6 @@ $('#expense-list').addEventListener('click', async (ev) => {
 function renderBalances(members, balances) {
   $('#balance-list').innerHTML = members.map((m) => {
     const bal = balances[m.id] ?? 0;
-    // 公帳的負結餘代表「還握有大家的錢」，改以餘額呈現
-    if (m.is_fund) {
-      const held = Math.round(-bal * 100) / 100;
-      const cls = held > 0.005 ? 'positive' : held < -0.005 ? 'negative' : 'zero';
-      return `
-      <li>
-        <span class="member-name-row">${escapeHtml(m.name)}</span>
-        <span class="balance-amount ${cls}">${held < -0.005 ? '透支' : '餘額'} ${fmt(Math.abs(held))}</span>
-      </li>`;
-    }
     const cls = bal > 0.005 ? 'positive' : bal < -0.005 ? 'negative' : 'zero';
     const note = bal > 0.005 ? '應收' : bal < -0.005 ? '應付' : '結清';
     return `
@@ -592,8 +588,7 @@ function renderStats() {
     paid[e.payer_id] = (paid[e.payer_id] || 0) + e.amount;
     for (const s of e.splits) share[s.member_id] = (share[s.member_id] || 0) + s.amount;
   }
-  // 公帳沒付過錢就不佔一行
-  const statMembers = members.filter((m) => !m.is_fund || paid[m.id]);
+  const statMembers = members;
   const maxPaid = Math.max(...statMembers.map((m) => paid[m.id] || 0), 1);
   $('#member-stats').innerHTML = statMembers.map((m) => {
     const p = paid[m.id] || 0;
@@ -811,7 +806,7 @@ $('#btn-clear-filters').addEventListener('click', () => {
 
 /* ===== 一句記帳 ===== */
 function selectedSmartParticipantIds() {
-  const people = state.data?.members?.filter((member) => !member.is_fund) || [];
+  const people = state.data?.members || [];
   const validIds = new Set(people.map((member) => member.id));
   smartParticipantIds = new Set(
     [...smartParticipantIds].filter((memberId) => validIds.has(memberId))
@@ -834,7 +829,7 @@ function syncSmartParticipantControls() {
 }
 
 function renderSmartParticipants(members = state.data?.members || []) {
-  const people = members.filter((member) => !member.is_fund);
+  const people = members;
   if (people.length <= 6) smartParticipantsExpanded = false;
   const container = $('#smart-participants');
   container.classList.toggle('hidden', people.length === 0);
@@ -909,10 +904,11 @@ function updateSmartProgress(stage = 0) {
   return title;
 }
 
-function setSmartFeedback(message, error = false) {
+function setSmartFeedback(message, error = false, { showAddMember = false } = {}) {
   const feedback = $('#smart-feedback');
   feedback.textContent = message;
   feedback.classList.toggle('error', error);
+  $('#smart-add-member').classList.toggle('hidden', !showAddMember);
 }
 
 function syncSmartAnalyzeButton() {
@@ -1445,6 +1441,13 @@ function aiDraftFocusTarget(draft) {
 
 function applyAiDraft(result) {
   const { draft } = result;
+  if (aiDraftNeedsTransferMember(draft, state.data?.members)) {
+    setSmartFeedback('辨識為轉帳，但帳本目前沒有其他收款成員。', true, {
+      showAddMember: true,
+    });
+    return false;
+  }
+
   openExpenseModal(null, { aiDraft: true, deferOpen: true });
   aiDraftConsumesSmartEntry = result.provider !== 'recent';
   if (result.provider !== 'recent') modalReturnFocus = $('#smart-input');
@@ -1484,6 +1487,7 @@ function applyAiDraft(result) {
   showAiReview(result);
   setSmartFeedback('草稿已建立，請確認後儲存');
   showExpenseModal(aiDraftFocusTarget(draft));
+  return true;
 }
 
 async function analyzeSmartEntry() {
@@ -1530,7 +1534,7 @@ async function analyzeSmartEntry() {
       restoreInputFocus = true;
       return;
     }
-    applyAiDraft(result);
+    restoreInputFocus = !applyAiDraft(result);
   } catch (error) {
     if (analysisSequence !== smartAnalysisSequence) return;
     cancelled = !!error.cancelled || controller.signal.aborted;
@@ -1775,7 +1779,16 @@ function setExpenseSubmitting(submitting, pendingLabel = '儲存中…') {
   $('.modal-card').setAttribute('aria-busy', String(submitting));
 }
 
+function hasTransferRecipient(members = []) {
+  return members.length > 1;
+}
+
+function aiDraftNeedsTransferMember(draft, members = []) {
+  return draft?.kind === 'transfer' && !hasTransferRecipient(members);
+}
+
 function setKind(kind) {
+  if (kind === 'transfer' && !hasTransferRecipient(state.data?.members)) kind = 'expense';
   expenseKind = kind;
   const isTr = kind === 'transfer';
   $('#kind-expense').classList.toggle('active', kind === 'expense');
@@ -1798,7 +1811,7 @@ function setKind(kind) {
   const description = $('#exp-desc');
   transferTarget.required = isTr;
   description.required = !isTr;
-  description.placeholder = isTr ? '選填，例如：訂房代墊、儲值公帳' : '例如：晚餐、車票';
+  description.placeholder = isTr ? '選填，例如：訂房代墊、結算還款' : '例如：晚餐、車票';
   (isTr ? description : transferTarget).removeAttribute('aria-invalid');
   if (isTr) {
     $('#split-members').classList.add('hidden');
@@ -1815,14 +1828,13 @@ $('#kind-expense').addEventListener('click', () => setKind('expense'));
 $('#kind-income').addEventListener('click', () => setKind('income'));
 $('#kind-transfer').addEventListener('click', () => setKind('transfer'));
 
-// 收款對象：所有成員（公帳排最前面），排除目前的匯款人
+// 收款對象為匯款人以外的其他成員。
 function renderTransferTargets(selected) {
   const sel = $('#exp-transfer-to');
   const prev = selected ?? sel.value;
   const payerId = $('#exp-payer').value;
   const targets = state.data.members
-    .filter((m) => m.id !== payerId)
-    .sort((a, b) => (b.is_fund ? 1 : 0) - (a.is_fund ? 1 : 0));
+    .filter((m) => m.id !== payerId);
   sel.innerHTML = targets.map((m) =>
     `<option value="${m.id}">${escapeHtml(m.name)}</option>`).join('');
   if (targets.some((m) => m.id === prev)) sel.value = prev;
@@ -1907,8 +1919,7 @@ function openExpenseModal(expense = null, { aiDraft = false, deferOpen = false }
     `<option value="${m.id}">${escapeHtml(m.name)}</option>`).join('');
   $('#exp-payer').value = expense?.payer_id || state.memberId;
 
-  // 分攤名單不含公帳（公帳的錢進出用「轉帳」或當付款人）
-  const splitMembers = members.filter((m) => !m.is_fund);
+  const splitMembers = members;
   const splitMap = new Map((expense?.splits || []).map((s) => [s.member_id, s.amount]));
   $('#split-members').innerHTML = splitMembers.map((m) => `
     <li data-id="${m.id}">
@@ -2324,7 +2335,7 @@ $('#form-expense').addEventListener('submit', async (ev) => {
     payload = {
       payerId: $('#exp-payer').value,
       description: $('#exp-desc').value.trim()
-        || (toMember?.is_fund ? '存入公帳' : `匯款給 ${toMember?.name ?? '?'}`),
+        || `匯款給 ${toMember?.name ?? '?'}`,
       amount,
       kind: 'expense',
       category: transferCat,

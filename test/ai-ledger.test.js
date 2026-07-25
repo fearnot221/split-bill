@@ -14,9 +14,9 @@ const {
 
 const context = {
   members: [
-    { id: 'me', name: '我', is_fund: 0 },
-    { id: 'ming', name: '小明', is_fund: 0 },
-    { id: 'fund', name: '公帳', is_fund: 1 },
+    { id: 'me', name: '我' },
+    { id: 'ming', name: '小明' },
+    { id: 'mei', name: '小美' },
   ],
   categories: [
     { name: '餐飲' }, { name: '交通' }, { name: '住宿' }, { name: '其他' },
@@ -344,7 +344,7 @@ test('local parser handles everyone, income, and no-split phrases', () => {
     localParse(everyoneText, { ...context, today: '2026-07-14', hasReceipt: false }),
     { ...context, today: '2026-07-14', sourceText: everyoneText }
   );
-  assert.deepEqual(everyone.participantIds, ['me', 'ming']);
+  assert.deepEqual(everyone.participantIds, ['me', 'ming', 'mei']);
   assert.equal(everyone.splitMode, 'equal');
 
   const incomeText = '退款收入 500 我收款不分攤';
@@ -362,7 +362,7 @@ test('local parser handles everyone, income, and no-split phrases', () => {
     { ...context, today: '2026-07-14', sourceText: personalMealText }
   );
   assert.equal(personalMeal.splitMode, 'equal');
-  assert.deepEqual(personalMeal.participantIds, ['me', 'ming']);
+  assert.deepEqual(personalMeal.participantIds, ['me', 'ming', 'mei']);
 
   for (const text of ['晚餐500不用分', '晚餐500不需分', '晚餐500算個人']) {
     const personal = normalizeDraft(
@@ -461,10 +461,6 @@ test('local parser preserves description words and extracts a trailing note', ()
 test('local parser handles common payer, transfer, date, category, and total phrasing', () => {
   const richContext = {
     ...context,
-    members: [
-      ...context.members,
-      { id: 'mei', name: '小美', is_fund: 0 },
-    ],
     categories: [...context.categories, { name: '醫療' }],
   };
   const cases = [
@@ -481,8 +477,8 @@ test('local parser handles common payer, transfer, date, category, and total phr
       expected: { kind: 'transfer', payerId: 'ming', transferToId: 'me', amount: 500 },
     },
     {
-      text: '我轉800到公帳',
-      expected: { kind: 'transfer', payerId: 'me', transferToId: 'fund', amount: 800 },
+      text: '我轉800給小美',
+      expected: { kind: 'transfer', payerId: 'me', transferToId: 'mei', amount: 800 },
     },
     {
       text: '退款 300 小美收，我跟小美均分',
@@ -680,9 +676,9 @@ test('OpenAI instructions describe explicit participants by name without member 
   const privateContext = {
     ...context,
     members: [
-      { id: 'private-id-owner', name: '我', is_fund: 0 },
-      { id: 'private-id-ming', name: '小明', is_fund: 0 },
-      { id: 'private-id-fund', name: '公帳', is_fund: 1 },
+      { id: 'private-id-owner', name: '我' },
+      { id: 'private-id-ming', name: '小明' },
+      { id: 'private-id-mei', name: '小美' },
     ],
     defaultMemberId: 'private-id-owner',
     explicitParticipantIds: ['private-id-ming'],
@@ -696,9 +692,11 @@ test('OpenAI instructions describe explicit participants by name without member 
     safetyIdentifier: 'ledger_test',
   });
   assert.match(request.instructions, /明確指定分帳對象：\["小明"\]/);
+  const serializedRequest = JSON.stringify(request);
   for (const member of privateContext.members) {
-    assert.equal(request.instructions.includes(member.id), false, member.id);
+    assert.equal(serializedRequest.includes(member.id), false, member.id);
   }
+  assert.doesNotMatch(serializedRequest, /is_fund|public_fund/);
 });
 
 test('parses and normalizes a structured OpenAI response', async () => {

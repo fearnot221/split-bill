@@ -378,13 +378,13 @@ function getAiContext(groupId, preferredMemberId) {
   const group = db.prepare('SELECT id FROM groups WHERE id = ?').get(groupId);
   if (!group) return null;
   const members = db.prepare(
-    'SELECT id, name, is_fund FROM members WHERE group_id = ? ORDER BY created_at'
+    'SELECT id, name FROM members WHERE group_id = ? ORDER BY created_at'
   ).all(groupId);
   const categories = db.prepare(
     'SELECT name FROM categories WHERE group_id = ? ORDER BY sort, rowid'
   ).all(groupId);
-  const preferred = members.find((member) => member.id === preferredMemberId && !member.is_fund);
-  const defaultMember = preferred || members.find((member) => !member.is_fund) || members[0];
+  const preferred = members.find((member) => member.id === preferredMemberId);
+  const defaultMember = preferred || members[0];
   return { members, categories, defaultMemberId: defaultMember?.id || null };
 }
 
@@ -392,7 +392,7 @@ function validateExplicitParticipantIds(value, context) {
   if (value === undefined || value === null) return { participantIds: [] };
   if (!Array.isArray(value)) return { error: '分帳對象格式不正確' };
   if (value.length === 0) return { participantIds: [] };
-  const people = context.members.filter((member) => !member.is_fund);
+  const people = context.members;
   if (value.length > people.length) return { error: '分帳對象數量不正確' };
   const memberById = new Map(context.members.map((member) => [member.id, member]));
   const selected = new Set();
@@ -401,7 +401,6 @@ function validateExplicitParticipantIds(value, context) {
     if (selected.has(memberId)) return { error: '同一分帳對象不能重複選擇' };
     const member = memberById.get(memberId);
     if (!member) return { error: '分帳對象不在帳本中' };
-    if (member.is_fund) return { error: '公帳不能作為一般分帳對象' };
     selected.add(memberId);
   }
   return {
@@ -619,12 +618,11 @@ app.get('/api/me', (req, res) => {
       db.prepare('INSERT INTO members (id, group_id, name) VALUES (?, ?, ?)')
         .run(memberId, groupId, '我');
       db.seedCategories(groupId);
-      db.seedFund(groupId);
     })();
     group = db.prepare('SELECT * FROM groups WHERE id = ?').get(groupId);
   }
   let me = db
-    .prepare('SELECT * FROM members WHERE group_id = ? AND is_fund = 0 ORDER BY created_at LIMIT 1')
+    .prepare('SELECT * FROM members WHERE group_id = ? ORDER BY created_at LIMIT 1')
     .get(group.id);
   if (!me) {
     let name = '我';
@@ -681,16 +679,15 @@ app.post('/api/groups/:id/members', requireAdmin, (req, res) => {
   res.json({ memberId });
 });
 
-// 刪除成員（公帳或有帳務紀錄則不可刪）
+// 刪除成員（最後一位或有帳務紀錄時不可刪）
 app.delete('/api/groups/:id/members/:memberId', requireAdmin, (req, res) => {
   const { id, memberId } = req.params;
   const member = db.prepare('SELECT * FROM members WHERE id = ? AND group_id = ?').get(memberId, id);
   if (!member) return res.status(404).json({ error: '找不到成員' });
-  if (member.is_fund) return res.status(400).json({ error: '「公帳」為系統帳戶，無法刪除' });
-  const regularCount = db
-    .prepare('SELECT COUNT(*) AS count FROM members WHERE group_id = ? AND is_fund = 0')
+  const memberCount = db
+    .prepare('SELECT COUNT(*) AS count FROM members WHERE group_id = ?')
     .get(id).count;
-  if (regularCount <= 1) return res.status(400).json({ error: '帳本至少需要保留一位一般成員' });
+  if (memberCount <= 1) return res.status(400).json({ error: '帳本至少需要保留一位成員' });
   const involved = db
     .prepare(`SELECT 1 FROM expenses WHERE group_id = ? AND payer_id = ?
               UNION SELECT 1 FROM expense_splits s JOIN expenses e ON e.id = s.expense_id

@@ -492,7 +492,15 @@ select.app-select option { color: var(--ink); background: var(--card); }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.smart-feedback-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 27px;
+}
 .smart-feedback {
+  flex: 1;
+  min-width: 0;
   min-height: 21px;
   margin-top: 6px;
   color: var(--sub);
@@ -500,6 +508,12 @@ select.app-select option { color: var(--ink); background: var(--card); }
   font-weight: 600;
 }
 .smart-feedback.error { color: var(--red); }
+.smart-feedback-row .pill-btn {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
 .smart-recents {
   display: flex;
   align-items: center;

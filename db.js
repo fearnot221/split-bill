@@ -22,7 +22,6 @@ CREATE TABLE IF NOT EXISTS members (
   id TEXT PRIMARY KEY,
   group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
-  is_fund INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE (group_id, name)
 );
@@ -114,8 +113,29 @@ if (!expenseCols.some((c) => c.name === 'request_key')) {
 db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_expenses_request_key
   ON expenses(request_key) WHERE request_key IS NOT NULL`);
 const memberCols = db.prepare('PRAGMA table_info(members)').all();
-if (!memberCols.some((c) => c.name === 'is_fund')) {
-  db.exec('ALTER TABLE members ADD COLUMN is_fund INTEGER NOT NULL DEFAULT 0');
+if (memberCols.some((c) => c.name === 'is_fund')) {
+  const removedFunds = db.transaction(() => {
+    const references = db.prepare(`SELECT
+      (SELECT COUNT(*) FROM expenses e
+        JOIN members m ON m.id = e.payer_id WHERE m.is_fund = 1) AS payer_refs,
+      (SELECT COUNT(*) FROM expense_splits s
+        JOIN members m ON m.id = s.member_id WHERE m.is_fund = 1) AS split_refs`).get();
+    const referenceCount = references.payer_refs + references.split_refs;
+    if (referenceCount > 0) {
+      throw new Error(
+        `無法移除舊公帳角色：仍有 ${referenceCount} 筆帳務關聯。`
+        + '請先使用舊版匯出或清理相關紀錄後再升級。'
+      );
+    }
+
+    const removed = db.prepare('DELETE FROM members WHERE is_fund = 1').run().changes;
+    db.exec('ALTER TABLE members DROP COLUMN is_fund');
+    db.prepare(`INSERT INTO admin_config (key, value) VALUES (?, ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value`)
+      .run('remove_public_fund_role_v1', '1');
+    return removed;
+  })();
+  if (removedFunds > 0) console.warn(`已移除 ${removedFunds} 個未使用的舊公帳角色。`);
 }
 
 // 舊版在驗證後才逐筆四捨五入，可能留下小額差異或 0 元紀錄。
@@ -233,22 +253,8 @@ db.seedCategories = (groupId) => {
     ins.run(require('crypto').randomUUID(), groupId, name, icon, i);
   });
 };
-// 幫每本帳補上「公帳」虛擬成員：可收轉帳（存入公費）、也可作為付款人（公費支出）
-db.seedFund = (groupId) => {
-  const has = db.prepare('SELECT 1 FROM members WHERE group_id = ? AND is_fund = 1 LIMIT 1').get(groupId);
-  if (has) return;
-  const named = db.prepare('SELECT id FROM members WHERE group_id = ? AND name = ?').get(groupId, '公帳');
-  if (named) {
-    db.prepare('UPDATE members SET is_fund = 1 WHERE id = ?').run(named.id);
-  } else {
-    db.prepare('INSERT INTO members (id, group_id, name, is_fund) VALUES (?, ?, ?, 1)')
-      .run(require('crypto').randomUUID(), groupId, '公帳');
-  }
-};
-
 for (const g of db.prepare('SELECT id FROM groups').all()) {
   db.seedCategories(g.id);
-  db.seedFund(g.id);
 }
 
 module.exports = db;

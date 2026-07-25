@@ -79,6 +79,14 @@ test('API protects access, validates money, and rejects stale updates', async (t
     assert.equal(me.response.headers.get('cache-control'), 'no-store');
     groupId = me.body.groupId;
     payerId = me.body.memberId;
+    assert.equal(Object.hasOwn(me.body, 'is_fund'), false);
+
+    const ledger = await request(`/api/groups/${groupId}`);
+    assert.equal(ledger.response.status, 200);
+    assert.equal(ledger.body.members.length, 1);
+    assert.equal(ledger.body.members[0].id, payerId);
+    assert.equal(ledger.body.members[0].name, '我');
+    assert.equal(Object.hasOwn(ledger.body.members[0], 'is_fund'), false);
 
     const unauthorized = await request(`/api/groups/${groupId}`, {
       method: 'PATCH',
@@ -111,6 +119,26 @@ test('API protects access, validates money, and rejects stale updates', async (t
       body: { name: '私人帳本', currency: 'NT$' },
     });
     assert.equal(settings.response.status, 200);
+
+    const lastMember = await request(`/api/groups/${groupId}/members/${payerId}`, {
+      method: 'DELETE',
+      admin: true,
+    });
+    assert.equal(lastMember.response.status, 400);
+    assert.match(lastMember.body.error, /至少需要保留一位成員/);
+
+    const unusedMember = await request(`/api/groups/${groupId}/members`, {
+      method: 'POST',
+      admin: true,
+      body: { name: '待刪除成員' },
+    });
+    assert.equal(unusedMember.response.status, 200);
+    const deletedUnused = await request(
+      `/api/groups/${groupId}/members/${unusedMember.body.memberId}`,
+      { method: 'DELETE', admin: true }
+    );
+    assert.equal(deletedUnused.response.status, 200);
+    assert.equal(deletedUnused.body.ok, true);
 
     const member = await request(`/api/groups/${groupId}/members`, {
       method: 'POST',
@@ -206,14 +234,10 @@ test('API protects access, validates money, and rejects stale updates', async (t
     assert.deepEqual(new Set(inferred.body.draft.participantIds), new Set([payerId, memberId]));
     assert.doesNotMatch(inferred.body.notices.join(' '), /已套用分帳對象/);
 
-    const ledger = await request(`/api/groups/${groupId}`);
-    const fundId = ledger.body.members.find((member) => member.is_fund)?.id;
-    assert.ok(fundId);
     const invalidSelections = [
       { value: memberId, message: /格式/ },
       { value: [memberId, memberId], message: /重複/ },
       { value: ['not-a-member'], message: /不在帳本/ },
-      { value: [fundId], message: /公帳/ },
     ];
     for (const { value, message } of invalidSelections) {
       const invalid = await request(`/api/groups/${groupId}/ai/parse`, {
@@ -526,6 +550,20 @@ test('API protects access, validates money, and rejects stale updates', async (t
     const atomicallyEdited = afterAtomicRemoval.body.expenses.find((expense) => expense.id === expenseId);
     assert.equal(atomicallyEdited.description, '原子移除單據');
     assert.equal(atomicallyEdited.receipt, null);
+  });
+
+  await t.test('keeps members that are referenced by ledger records', async () => {
+    const deletion = await request(`/api/groups/${groupId}/members/${memberId}`, {
+      method: 'DELETE',
+      admin: true,
+    });
+    assert.equal(deletion.response.status, 409);
+    assert.match(deletion.body.error, /已有帳務紀錄/);
+
+    const ledger = await request(`/api/groups/${groupId}`);
+    assert.equal(ledger.response.status, 200);
+    assert.ok(ledger.body.members.some((member) => member.id === memberId));
+    assert.equal(ledger.body.members.every((member) => !Object.hasOwn(member, 'is_fund')), true);
   });
 
   await t.test('invalidates sessions when the admin password is reset out of band', async () => {
