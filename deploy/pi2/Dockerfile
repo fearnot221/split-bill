@@ -27,7 +27,8 @@ COPY --from=verified /app/lib ./lib
 COPY --from=verified /app/public ./public
 COPY --from=verified /app/scripts ./scripts
 
-ENV NODE_ENV=production \
+ENV APP_REVISION=$COMMIT_SHA \
+    NODE_ENV=production \
     PORT=3100 \
     HOST=0.0.0.0 \
     DB_PATH=/data/data.db \

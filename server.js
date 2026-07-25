@@ -50,6 +50,9 @@ const AI_REQUESTS_PER_HOUR = positiveIntegerEnv(process.env.AI_REQUESTS_PER_HOUR
 const MAINTENANCE_FILE = process.env.MAINTENANCE_FILE
   ? path.resolve(process.env.MAINTENANCE_FILE)
   : '';
+const APP_REVISION = /^[0-9a-f]{40}$/.test(process.env.APP_REVISION || '')
+  ? process.env.APP_REVISION
+  : '';
 
 if (APP_USERNAME.includes(':') || /[\r\n]/.test(APP_USERNAME)) {
   throw new Error('APP_USERNAME cannot contain a colon or line break');
@@ -110,6 +113,7 @@ app.use((req, res, next) => {
 
 app.get('/healthz', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
+  if (APP_REVISION) res.setHeader('X-App-Revision', APP_REVISION);
   res.type('text/plain').send('ok');
 });
 

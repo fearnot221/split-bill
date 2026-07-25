@@ -31,6 +31,7 @@ test.before(async () => {
   process.env.DB_PATH = path.join(tempDir, 'data.db');
   process.env.UPLOAD_DIR = path.join(tempDir, 'uploads');
   process.env.MAINTENANCE_FILE = path.join(tempDir, '.maintenance');
+  process.env.APP_REVISION = 'a'.repeat(40);
   process.env.APP_USERNAME = 'tester';
   process.env.APP_PASSWORD = 'access-secret';
   process.env.NODE_ENV = 'test';
@@ -61,6 +62,7 @@ test('API protects access, validates money, and rejects stale updates', async (t
     assert.equal(response.status, 200);
     assert.equal(await response.text(), 'ok');
     assert.equal(response.headers.get('cache-control'), 'no-store');
+    assert.equal(response.headers.get('x-app-revision'), 'a'.repeat(40));
     assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
     assert.equal(response.headers.get('x-powered-by'), null);
   });

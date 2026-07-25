@@ -51,6 +51,7 @@ journalctl --user -u split-bill-sync.service -n 100 --no-pager
 cat /home/fearnot/projects/split-bill-docker/runtime/.deployed-commit
 docker inspect -f '{{ index .Config.Labels "org.opencontainers.image.revision" }}' split-bill
 curl -fsS https://bill.fearnot.tw/healthz
+curl -fsSI https://bill.fearnot.tw/healthz | grep -i '^x-app-revision:'
 ```
 
 The marker, image revision label, Pi checkout, and GitHub `main` SHA must match. A second sync run should log `already running healthy commit` without rebuilding.
