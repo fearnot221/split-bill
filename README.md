@@ -52,7 +52,7 @@ npm start
 
 打開 http://localhost:3000 即可使用。服務預設只監聽 `127.0.0.1`；開發模式（改檔自動重啟）：`npm run dev`，換埠號：`PORT=8080 npm start`。只有確實需要區網直連時才改用 `HOST=0.0.0.0 npm start`。
 
-`GET /healthz` 會回傳 `ok`，可供反向代理或服務管理器做不含帳務與 AI 狀態的存活檢查。
+`GET /healthz` 會回傳 `ok`，可供反向代理或服務管理器做不含帳務與 AI 狀態的存活檢查；SHA 映像另以 `X-App-Revision` 回傳實際運行版本。
 
 資料存在伺服器的 `data.db`（SQLite，已列入 `.gitignore`），所有裝置連同一台伺服器即共用同一份帳本。
 
@@ -156,7 +156,7 @@ WantedBy=multi-user.target
 
 在 `/etc/split-bill.env` 設定 `APP_USERNAME` 與 `APP_PASSWORD`，並限制檔案權限。對外可使用 Cloudflare Tunnel 或 Nginx/Caddy；只有在應用程式前方確實只有一層可信任代理時才設定 `TRUST_PROXY=1`，讓 HTTPS session cookie 與來源 IP 判斷正確。
 
-目前 `pi-2` 正式環境採用 Docker、GitHub HMAC webhook 與 systemd timer 雙重觸發。新 commit 會先執行完整測試、建立資料快照，並用快照副本預檢 migration；正式健康檢查失敗時會自動回復上一個 image、資料庫與單據。設定與驗證方式見 [`deploy/pi2/README.md`](deploy/pi2/README.md)。
+目前 `pi-2` 正式環境以固定 IP、`bill.fearnot.tw` 與 Nginx 對外服務，不依賴 tunnel；部署採用 Docker、GitHub HMAC webhook 與 systemd timer 雙重觸發。新 commit 會先執行完整測試、建立資料快照，並用快照副本預檢 migration；正式健康檢查失敗時會自動回復上一個 image、資料庫與單據。設定與驗證方式見 [`deploy/pi2/README.md`](deploy/pi2/README.md)。
 
 ## 驗證
 
