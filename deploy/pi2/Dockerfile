@@ -27,6 +27,10 @@ COPY --from=verified /app/lib ./lib
 COPY --from=verified /app/public ./public
 COPY --from=verified /app/scripts ./scripts
 
+# Git runs under a restrictive systemd umask on pi-2. Normalize copied files so
+# the unprivileged runtime user can always read the application image.
+RUN chmod -R go+rX /app
+
 ENV APP_REVISION=$COMMIT_SHA \
     NODE_ENV=production \
     PORT=3100 \
@@ -36,6 +40,9 @@ ENV APP_REVISION=$COMMIT_SHA \
     BACKUP_DIR=/data/backups
 
 USER node
+RUN test "$(id -un)" = node \
+    && test -r /app/server.js \
+    && node --check /app/server.js
 EXPOSE 3100
 HEALTHCHECK --interval=10s --timeout=4s --start-period=10s --retries=5 \
   CMD node -e 'fetch("http://127.0.0.1:3100/healthz").then(async (response) => process.exit(response.ok && await response.text() === "ok" ? 0 : 1)).catch(() => process.exit(1))'

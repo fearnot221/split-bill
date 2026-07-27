@@ -357,6 +357,13 @@ cleanup() {
   local status=$?
   trap - EXIT HUP INT TERM
   if [[ -n "$candidate_container" ]] && command -v docker >/dev/null 2>&1; then
+    if [[ $status -ne 0 ]]; then
+      log "candidate container diagnostics:" >&2
+      docker inspect --format \
+        'status={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} error={{json .State.Error}}' \
+        "$candidate_container" >&2 || true
+      docker logs --timestamps --tail 200 "$candidate_container" >&2 || true
+    fi
     docker rm -f "$candidate_container" >/dev/null 2>&1 || true
   fi
   if [[ $status -ne 0 && "$cutover_active" == true && "$recovery_in_progress" != true ]]; then
@@ -647,18 +654,29 @@ log "starting candidate against the snapshot copy"
 docker "${candidate_args[@]}" >/dev/null
 
 candidate_ok=false
+state=created
+health=none
 deadline=$((SECONDS + 60))
 while (( SECONDS < deadline )); do
   state=$(docker inspect --format '{{.State.Status}}' "$candidate_container" 2>/dev/null || true)
-  [[ "$state" == running ]] || break
-  if docker exec "$candidate_container" node -e \
-    'fetch("http://127.0.0.1:3100/healthz").then(async (response) => process.exit(response.ok && await response.text() === "ok" ? 0 : 1)).catch(() => process.exit(1))'; then
-    candidate_ok=true
-    break
-  fi
+  health=$(docker inspect --format \
+    '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' \
+    "$candidate_container" 2>/dev/null || true)
+  case "$state:$health" in
+    running:healthy)
+      candidate_ok=true
+      break
+      ;;
+    created:*|running:starting|running:unhealthy)
+      ;;
+    *)
+      break
+      ;;
+  esac
   sleep 2
 done
-[[ "$candidate_ok" == true ]] || die "candidate did not become healthy within 60 seconds"
+[[ "$candidate_ok" == true ]] \
+  || die "candidate did not become healthy within 60 seconds (status=$state health=$health)"
 docker exec "$candidate_container" node -e '
   const fs = require("fs");
   const path = require("path");
