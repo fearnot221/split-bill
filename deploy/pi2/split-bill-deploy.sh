@@ -10,6 +10,7 @@ readonly remote=origin
 readonly expected_remote=https://github.com/fearnot221/split-bill.git
 readonly compose_dir=/home/fearnot/projects/split-bill-docker
 readonly compose_file=$compose_dir/compose.yaml
+readonly systemd_user_dir=/home/fearnot/.config/systemd/user
 readonly runtime_dir=$compose_dir/runtime
 readonly env_file=$repo/.env
 readonly image_repository=split-bill-app
@@ -515,6 +516,8 @@ current_branch=$("${git_cmd[@]}" symbolic-ref --quiet --short HEAD) \
 [[ "$current_branch" == "$branch" ]] || die "repository is on $current_branch, expected $branch"
 "${git_cmd[@]}" diff --quiet || die "tracked working tree has local modifications"
 "${git_cmd[@]}" diff --cached --quiet || die "index has local modifications"
+[[ -z "$("${git_cmd[@]}" ls-files --others --exclude-standard)" ]] \
+  || die "working tree has non-ignored untracked files"
 
 log "fetching $remote/$branch"
 "${git_cmd[@]}" fetch --prune "$remote" \
@@ -541,6 +544,10 @@ fi
 [[ "$("${git_cmd[@]}" rev-parse HEAD)" == "$target" ]] || die "checkout did not reach target"
 cmp --silent "$compose_file" "$repo/deploy/pi2/compose.yaml" \
   || die "installed Compose differs from the reviewed repository template"
+for unit in split-bill-sync.service split-bill-sync.timer split-bill-webhook.service; do
+  cmp --silent "$systemd_user_dir/$unit" "$repo/deploy/pi2/$unit" \
+    || die "installed $unit differs from the reviewed repository template"
+done
 
 running_revision=
 if docker inspect "$container_name" >/dev/null 2>&1; then

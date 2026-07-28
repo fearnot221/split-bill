@@ -40,7 +40,7 @@ The updater intentionally requires the existing production `data.db` and rollbac
 
 The sync service deliberately uses `UMask=0077`. The production Dockerfile normalizes read and directory-traversal permissions after copying the application, then runs a build-time read check as the unprivileged `node` runtime user. Candidate startup waits on the image `HEALTHCHECK`; failures record only container state and the last 200 log lines before cleanup, without dumping environment variables.
 
-The installed `compose.yaml` must remain byte-for-byte identical to the reviewed repository template. Application commits deploy automatically; a commit that changes production Compose or systemd assets requires reinstalling those assets before reconciliation resumes.
+The installed `compose.yaml` and all three systemd unit files must remain byte-for-byte identical to the reviewed repository templates. Application commits deploy automatically; a commit that changes production Compose or systemd assets requires reinstalling those assets before reconciliation resumes.
 
 The router/firewall exposes only ports 80 and 443. Nginx proxies the exact `/github-webhook` path to `192.168.1.120:3200`; port 3200 is not exposed directly to the internet.
 
