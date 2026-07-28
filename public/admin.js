@@ -105,7 +105,10 @@ function deletedEntryMeta(expense) {
   const flow = source?.type === 'wallet'
     ? (expense.kind === 'income' ? '收入存入帳本錢包' : '帳本錢包付款')
     : `${accountName(source)} ${expense.kind === 'income' ? '收款' : '付款'}`;
-  return `${flow} ${fmt(expense.amount)}｜${expense.kind === 'income' ? '分配' : '分攤'}：${names}`;
+  const allocation = names
+    ? `${expense.kind === 'income' ? '分配' : '分攤'}：${names}`
+    : '不分攤：共同支出';
+  return `${flow} ${fmt(expense.amount)}｜${allocation}`;
 }
 
 async function api(url, options = {}) {

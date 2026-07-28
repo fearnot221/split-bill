@@ -337,6 +337,7 @@ function getGroupData(groupId) {
     name: wallet.name,
     balance: centsToMoney(walletLedger.balanceCents),
     positions,
+    sharedBalance: centsToMoney(walletLedger.sharedBalanceCents),
   };
   const total = centsToMoney(ledger.totalExpenseCents);
   const totalIncome = centsToMoney(ledger.totalIncomeCents);
@@ -555,7 +556,13 @@ function validateExpenseInput(groupId, body) {
     return { error: '非轉帳紀錄不能指定轉入對象' };
   }
 
-  if (!Array.isArray(body.splits) || body.splits.length === 0) {
+  if (!Array.isArray(body.splits)) {
+    return { error: '分攤資料格式不正確' };
+  }
+  const isSharedWalletExpense = normalizedKind === 'expense'
+    && source.type === 'wallet'
+    && body.splits.length === 0;
+  if (body.splits.length === 0 && !isSharedWalletExpense) {
     return { error: '請至少選擇一位分攤成員' };
   }
 
@@ -584,7 +591,7 @@ function validateExpenseInput(groupId, body) {
     if (splitCents > 0) splits.push({ memberId, amountCents: splitCents });
   }
 
-  if (splitTotalCents !== amountCents) {
+  if (!isSharedWalletExpense && splitTotalCents !== amountCents) {
     return {
       error: `分攤總額 ${centsToMoney(splitTotalCents)} 與紀錄金額 ${centsToMoney(amountCents)} 不符`,
     };

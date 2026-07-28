@@ -144,6 +144,44 @@ test('fresh schema creates one wallet per ledger and remains idempotent', (t) =>
   assertDatabaseHealthy(db);
 });
 
+test('startup integrity repair accepts a shared wallet expense without splits', (t) => {
+  const filename = makeTempDatabase(t);
+  assertMigrationSucceeded(runMigrations(filename));
+
+  const setup = new Database(filename);
+  setup.exec(`
+    INSERT INTO groups (id, name, code) VALUES ('group', '共同帳本', 'ABC123');
+    INSERT INTO members (id, group_id, name) VALUES ('person', 'group', '一般成員');
+  `);
+  setup.close();
+  assertMigrationSucceeded(runMigrations(filename));
+
+  const seeded = new Database(filename);
+  const wallet = seeded.prepare("SELECT id FROM ledger_wallets WHERE group_id = 'group'").get();
+  seeded.prepare(`INSERT INTO expenses (
+    id, group_id, payer_id, payer_wallet_id, description, amount, category,
+    expense_date, kind
+  ) VALUES ('shared', 'group', NULL, ?, '共同用品', 60, '其他', '2026-07-28', 'expense')`)
+    .run(wallet.id);
+  seeded.prepare("DELETE FROM admin_config WHERE key = 'ledger_integrity_cents_v1'").run();
+  seeded.close();
+
+  assertMigrationSucceeded(runMigrations(filename));
+  const db = new Database(filename);
+  t.after(() => db.close());
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS count FROM expense_splits WHERE expense_id = 'shared'").get().count,
+    0
+  );
+  const entry = db.prepare("SELECT * FROM expenses WHERE id = 'shared'").get();
+  entry.splits = [];
+  const ledger = calculateLedger([{ id: 'person' }], [entry], [wallet]);
+  assert.equal(ledger.walletLedgers[wallet.id].balanceCents, -6000);
+  assert.equal(ledger.walletLedgers[wallet.id].sharedBalanceCents, -6000);
+  assert.deepEqual(ledger.walletLedgers[wallet.id].positionsCents, { person: 0 });
+  assertDatabaseHealthy(db);
+});
+
 test('upgrades old expense columns and repairs cent-level legacy drift', (t) => {
   const filename = makeTempDatabase(t);
   const legacy = new Database(filename);

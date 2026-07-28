@@ -230,9 +230,19 @@ test('treats the public wallet as an account, never as a split member', () => {
     assert.deepEqual(draft.participantIds, ['me', 'ming', 'mei'], text);
     assert.equal(draft.splitMode, 'equal', text);
   }
+
+  const sharedExpenseText = '帳本錢包付共同用品 600，不分攤';
+  const sharedExpense = normalizeDraft(
+    localParse(sharedExpenseText, { ...walletContext, hasReceipt: false }),
+    { ...walletContext, sourceText: sharedExpenseText }
+  );
+  assert.equal(sharedExpense.ready, true);
+  assert.equal(sharedExpense.payerSource, 'wallet');
+  assert.equal(sharedExpense.splitMode, 'none');
+  assert.deepEqual(sharedExpense.participantIds, []);
 });
 
-test('requires wallet allocations and gives an exact member name priority over wallet aliases', () => {
+test('allows shared wallet expenses and gives exact member names priority over wallet aliases', () => {
   const walletContext = {
     ...context,
     wallet: { id: 'wallet', name: '公帳' },
@@ -255,9 +265,29 @@ test('requires wallet allocations and gives an exact member name priority over w
     warnings: [],
   }, { ...walletContext, sourceText: '帳本錢包付晚餐 600' });
   assert.equal(missingAllocation.payerSource, 'wallet');
-  assert.equal(missingAllocation.ready, false);
+  assert.equal(missingAllocation.ready, true);
   assert.deepEqual(missingAllocation.participantIds, []);
-  assert.match(missingAllocation.warnings.join(' '), /至少一位分攤成員/);
+  assert.equal(missingAllocation.splitMode, 'none');
+  assert.doesNotMatch(missingAllocation.warnings.join(' '), /至少一位分攤成員/);
+
+  const unallocatedIncome = normalizeDraft({
+    isLedgerEntry: true,
+    kind: 'income',
+    description: '共同退款',
+    amount: 100,
+    category: '其他',
+    expenseDate: '2026-07-14',
+    payerName: '帳本錢包',
+    participantNames: [],
+    splitMode: 'none',
+    customSplits: [],
+    transferToName: null,
+    note: null,
+    confidence: 0.9,
+    warnings: [],
+  }, { ...walletContext, sourceText: '帳本錢包收到退款 100' });
+  assert.equal(unallocatedIncome.ready, false);
+  assert.match(unallocatedIncome.warnings.join(' '), /至少一位分配成員/);
 
   const namedMemberContext = {
     ...walletContext,
@@ -1049,7 +1079,7 @@ test('uses low-detail vision first and upgrades only incomplete receipt drafts',
   });
 });
 
-test('receipt merging keeps a wallet entry without real participants unready', async () => {
+test('receipt merging accepts a shared wallet expense without member participants', async () => {
   const walletContext = {
     ...context,
     wallet: { id: 'wallet', name: '公帳' },
@@ -1080,8 +1110,8 @@ test('receipt merging keeps a wallet entry without real participants unready', a
   assert.equal(requestCount, 1);
   assert.equal(result.draft.payerSource, 'wallet');
   assert.deepEqual(result.draft.participantIds, []);
-  assert.equal(result.draft.ready, false);
-  assert.match(result.draft.warnings.join(' '), /至少一位分攤成員/);
+  assert.equal(result.draft.ready, true);
+  assert.doesNotMatch(result.draft.warnings.join(' '), /至少一位分攤成員/);
 });
 
 test('returns the low-detail receipt draft when its high-detail upgrade fails', async () => {

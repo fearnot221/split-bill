@@ -9,6 +9,7 @@ const vm = require('node:vm');
 const root = path.resolve(__dirname, '..');
 const html = fs.readFileSync(path.join(root, 'public/index.html'), 'utf8');
 const app = fs.readFileSync(path.join(root, 'public/app.js'), 'utf8');
+const datePicker = fs.readFileSync(path.join(root, 'public/ui-date-picker.js'), 'utf8');
 const adminHtml = fs.readFileSync(path.join(root, 'public/admin.html'), 'utf8');
 const adminApp = fs.readFileSync(path.join(root, 'public/admin.js'), 'utf8');
 const styles = fs.readFileSync(path.join(root, 'public/style.css'), 'utf8');
@@ -81,6 +82,49 @@ test('expense sheet, receipt viewer, and native selects use the current UI primi
   assert.match(html, /id="modal-toast"[^>]+role="status"/);
 });
 
+test('all date fields use one accessible custom calendar dialog', () => {
+  assert.doesNotMatch(html, /type="date"/);
+  const dateInputs = [...html.matchAll(/<input\b[^>]*\bid="(stats-from|stats-to|exp-date)"[^>]*>/g)];
+  assert.equal(dateInputs.length, 3);
+  assert.ok(dateInputs.every((match) => /type="hidden"/.test(match[0])));
+  assert.ok(dateInputs.every((match) => /\bdata-date-picker(?:\s|>)/.test(match[0])));
+  assert.match(dateInputs.find((match) => match[1] === 'exp-date')[0], /\brequired\b/);
+  assert.doesNotMatch(dateInputs.find((match) => match[1] === 'stats-from')[0], /\brequired\b/);
+  assert.doesNotMatch(dateInputs.find((match) => match[1] === 'stats-to')[0], /\brequired\b/);
+
+  const triggers = [...html.matchAll(/<button\b[^>]*\bdata-date-picker-for="([^"]+)"[^>]*>/g)];
+  assert.deepEqual(triggers.map((match) => match[1]).sort(), ['exp-date', 'stats-from', 'stats-to']);
+  assert.ok(triggers.every((match) => /aria-haspopup="dialog"/.test(match[0])));
+  assert.ok(triggers.every((match) => /aria-expanded="false"/.test(match[0])));
+  assert.ok(triggers.every((match) => /aria-controls="date-picker-dialog"/.test(match[0])));
+  assert.match(triggers.find((match) => match[1] === 'exp-date')[0], /aria-required="true"/);
+
+  const expenseStart = html.indexOf('<dialog id="modal-expense"');
+  const expenseEnd = html.indexOf('</dialog>', expenseStart);
+  const pickerStart = html.indexOf('<dialog id="date-picker-dialog"');
+  const pickerEnd = html.indexOf('</dialog>', pickerStart);
+  const receiptStart = html.indexOf('<dialog id="receipt-lightbox"');
+  assert.ok(expenseEnd < pickerStart, 'date picker must be a sibling after the expense dialog');
+  assert.ok(pickerEnd < receiptStart, 'date picker must not wrap the receipt dialog');
+  assert.match(html, /id="date-picker-grid"[^>]+role="grid"[^>]+aria-labelledby="date-picker-month"/);
+  assert.match(html, /id="date-picker-days"[^>]+role="rowgroup"/);
+  assert.equal((html.match(/role="columnheader"/g) || []).length, 7);
+  assert.match(html, /id="date-picker-month"[^>]+aria-live="polite"/);
+  assert.match(html, /src="ui-date-picker\.js\?v=1"/);
+  assert.ok(html.indexOf('ui-date-picker.js?v=1') < html.indexOf('app.js?v='));
+
+  assert.match(datePicker, /Array\.from\(\{ length: 42 \}/);
+  assert.match(datePicker, /keyboardTarget\(focusedIso, key, shiftKey\)/);
+  assert.match(datePicker, /new Event\('input', \{ bubbles: true \}\)/);
+  assert.match(datePicker, /new Event\('change', \{ bubbles: true \}\)/);
+  assert.match(datePicker, /window\.AppDatePicker = \{/);
+  assert.match(styles, /grid-template-columns: repeat\(7, minmax\(0, 1fr\)\)/);
+  assert.match(styles, /grid-template-rows: repeat\(6, 44px\)/);
+  assert.match(styles, /\.date-picker-surface \{[\s\S]*?overflow-y: auto;/);
+  assert.match(styles, /\.date-picker-trigger\[aria-invalid="true"\]/);
+  assert.match(styles, /@media \(max-width: 360px\)[\s\S]+\.date-picker-surface/);
+});
+
 test('managed forms and tooltips avoid browser-native mobile popovers', () => {
   for (const page of [html, adminHtml]) {
     const allForms = [...page.matchAll(/<form\b[^>]*>/g)]
@@ -140,7 +184,7 @@ test('public surfaces model the wallet separately from real members', () => {
   assert.match(adminApp, /overview\.members\.map/);
 });
 
-test('the wallet is a transfer account and wallet payments must be allocated to members', () => {
+test('the wallet stays separate while shared wallet expenses may remain unallocated', () => {
   const guardFunctions = app.match(
     /function hasTransferRecipient\(members = \[\], wallet = null\) \{[\s\S]*?\n\}\n\nfunction aiDraftNeedsTransferMember\(draft, members = \[\], wallet = null\) \{[\s\S]*?\n\}/
   );
@@ -180,9 +224,16 @@ test('the wallet is a transfer account and wallet payments must be allocated to 
   assert.match(html, /id="smart-add-member" class="pill-btn hidden" href="\/admin">新增成員<\/a>/);
   assert.match(styles, /\.smart-feedback-row \.pill-btn \{[\s\S]*?min-height: 44px;/);
   assert.match(app, /<optgroup label="帳本帳戶"><option[^>]*>帳本錢包<\/option>/);
-  assert.match(app, /const disallowNone = expenseKind !== 'transfer' && selectedSourceAccount\(\)\?\.type === 'wallet';/);
-  assert.match(app, /if \(mode === 'none' && selectedSourceAccount\(\)\?\.type === 'wallet'\) mode = 'equal';/);
-  assert.match(app, /帳本錢包付款必須分攤給實際成員/);
+  assert.match(app, /const disallowNone = expenseKind === 'income' && selectedSourceAccount\(\)\?\.type === 'wallet';/);
+  assert.match(
+    app,
+    /if \(mode === 'none' && expenseKind === 'income'[\s\S]*?selectedSourceAccount\(\)\?\.type === 'wallet'\) mode = 'equal';/
+  );
+  assert.match(app, /splits = source\.type === 'wallet' \? \[\] : \[\{ memberId: source\.id, amount \}\];/);
+  assert.match(app, /source\?\.type === 'wallet' && expense\.splits\.length === 0/);
+  assert.match(app, /這筆會列為共同支出，不會計入任何成員的結餘/);
+  assert.match(app, /const sharedBalance = Number\(wallet\.sharedBalance\) \|\| 0;/);
+  assert.doesNotMatch(app, /帳本錢包付款必須分攤給實際成員/);
 });
 
 test('unresolved AI accounts stay blank until the user explicitly selects them', () => {

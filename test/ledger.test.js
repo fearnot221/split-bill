@@ -145,6 +145,7 @@ test('tracks wallet cash and member positions without mixing them into settlemen
       wallet: {
         balanceCents: 4000,
         positionsCents: { alice: 7000, bob: -3000, charlie: 0 },
+        sharedBalanceCents: 0,
       },
     },
     totalExpenseCents: 6000,
@@ -185,6 +186,7 @@ test('records wallet withdrawals and income against the receiving members positi
   assert.deepEqual(ledger.walletLedgers.wallet, {
     balanceCents: 4000,
     positionsCents: { alice: 3000, bob: 1000, charlie: 0 },
+    sharedBalanceCents: 0,
   });
   assert.equal(ledger.totalExpenseCents, 0);
   assert.equal(ledger.totalIncomeCents, 1000);
@@ -205,11 +207,25 @@ test('allows a wallet overdraft and keeps each members top-up position explicit'
   assert.deepEqual(ledger.walletLedgers.wallet, {
     balanceCents: -6000,
     positionsCents: { alice: -3000, bob: -3000, charlie: 0 },
+    sharedBalanceCents: 0,
   });
   assert.deepEqual(ledger.balancesCents, { alice: 0, bob: 0, charlie: 0 });
 });
 
 test('rejects invalid wallet sources, targets, and non-member wallet splits', () => {
+  assert.throws(
+    () => calculateLedger(members, [expense({ splits: [] })], wallets),
+    /at least one split/
+  );
+  assert.throws(
+    () => calculateLedger(members, [expense({
+      payer_id: null,
+      payer_wallet_id: 'wallet',
+      kind: 'income',
+      splits: [],
+    })], wallets),
+    /at least one split/
+  );
   assert.throws(
     () => calculateLedger(members, [{
       payer_id: 'alice',
@@ -263,6 +279,7 @@ test('allows only omitted or empty splits when a transfer has an explicit target
     walletLedgers: { wallet: {
       balanceCents: 0,
       positionsCents: { alice: 0, bob: 0, charlie: 0 },
+      sharedBalanceCents: 0,
     } },
     totalExpenseCents: 0,
     totalIncomeCents: 0,
@@ -316,6 +333,35 @@ test('preserves money across a mixed ledger and its settlements', () => {
     settled[settlement.to] -= settlement.amountCents;
   }
   assert.deepEqual(settled, { alice: 0, bob: 0, charlie: 0 });
+});
+
+test('records an unallocated wallet expense without creating member debt', () => {
+  const ledger = calculateLedger(members, [
+    {
+      payer_id: 'alice',
+      transfer_to_wallet_id: 'wallet',
+      amount: '100.00',
+      category: '轉帳',
+      kind: 'transfer',
+      splits: [],
+    },
+    {
+      payer_wallet_id: 'wallet',
+      amount: '60.00',
+      category: '餐飲',
+      kind: 'expense',
+      splits: [],
+    },
+  ], wallets);
+
+  assert.deepEqual(ledger.walletLedgers.wallet, {
+    balanceCents: 4000,
+    positionsCents: { alice: 10000, bob: 0, charlie: 0 },
+    sharedBalanceCents: -6000,
+  });
+  assert.deepEqual(ledger.balancesCents, { alice: 0, bob: 0, charlie: 0 });
+  assert.deepEqual(calculateSettlements(ledger.balancesCents), []);
+  assert.equal(ledger.totalExpenseCents, 6000);
 });
 
 test('rejects a split that does not conserve the expense amount', () => {

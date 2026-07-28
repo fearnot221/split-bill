@@ -318,7 +318,10 @@ if (needsWalletMigration) {
       if (entry.transfer_to_member_id != null || entry.transfer_to_wallet_id != null) {
         migrationError(entry, '非轉帳紀錄不應有轉帳去向');
       }
-      if (splits.length === 0) migrationError(entry, '缺少分攤資料');
+      const isSharedWalletExpense = source.type === 'wallet'
+        && entry.kind === 'expense'
+        && splits.length === 0;
+      if (splits.length === 0 && !isSharedWalletExpense) migrationError(entry, '缺少分攤資料');
       for (const split of splits) {
         resolveMemberAccount(entry, split.member_id, '分攤資料', false);
       }
@@ -485,6 +488,13 @@ if (!migrationApplied) {
       }
       if (!valid) {
         unresolved += 1;
+        continue;
+      }
+
+      if (expense.kind === 'expense' && expense.payer_wallet_id && splits.length === 0) {
+        if (amountCents === 0) amountCents = 1;
+        const normalizedAmount = centsToMoney(amountCents);
+        if (expense.amount !== normalizedAmount) updateExpense.run(normalizedAmount, expense.id);
         continue;
       }
 

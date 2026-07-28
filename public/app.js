@@ -144,6 +144,17 @@ function todayLocal() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+function setDatePickerValue(id, value, { dispatch = false } = {}) {
+  if (window.AppDatePicker) return window.AppDatePicker.setValue(id, value, { dispatch });
+  const input = $(`#${id}`);
+  input.value = value || '';
+  if (dispatch) {
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  return input.value;
+}
+
 function fmtDate(iso) {
   const [y, m, d] = iso.split('-').map(Number);
   const wd = '日一二三四五六'[new Date(y, m - 1, d).getDay()];
@@ -452,7 +463,10 @@ function expenseItemHtml(e) {
     const flow = source?.type === 'wallet'
       ? (isIncome(e) ? '收入存入帳本錢包' : '帳本錢包付款')
       : `${escapeHtml(accountName(source))} ${isIncome(e) ? '收款' : '付款'}`;
-    meta = `${flow}｜${isIncome(e) ? '分配' : '分攤'}：${names}`;
+    const allocation = e.splits.length
+      ? `${isIncome(e) ? '分配' : '分攤'}：${names}`
+      : '不分攤：共同支出';
+    meta = `${flow}｜${allocation}`;
   }
   const kindCls = isIncome(e) ? ' income' : isTransfer(e) ? ' transfer' : '';
   const description = escapeHtml(e.description);
@@ -566,7 +580,7 @@ function renderBalances(members, balances, wallet) {
     const positionRows = members.flatMap((member) => {
       const position = Number(wallet.positions?.[member.id]) || 0;
       if (Math.abs(position) <= 0.005) return [];
-      const label = position > 0 ? '尚餘' : '待補';
+      const label = position > 0 ? '淨投入' : '待補';
       const positionClass = position > 0 ? 'positive' : 'negative';
       return [`
         <li>
@@ -574,11 +588,17 @@ function renderBalances(members, balances, wallet) {
           <span class="balance-amount ${positionClass}">${label} ${fmt(Math.abs(position))}</span>
         </li>`];
     }).join('');
+    const sharedBalance = Number(wallet.sharedBalance) || 0;
+    const sharedRow = Math.abs(sharedBalance) <= 0.005 ? '' : `
+      <li>
+        <span class="member-name-row">共同支出</span>
+        <span class="balance-amount zero">已支用 ${fmt(Math.abs(sharedBalance))}</span>
+      </li>`;
     $('#wallet-balance-list').innerHTML = `
       <li>
         <span class="member-name-row">${balance < -0.005 ? '錢包缺口' : '可用餘額'}</span>
         <span class="balance-amount ${balanceClass}">${fmt(Math.abs(balance))}</span>
-      </li>${positionRows}`;
+      </li>${sharedRow}${positionRows}`;
   }
 
   $('#balance-list').innerHTML = members.map((m) => {
@@ -1563,7 +1583,7 @@ function aiDraftFocusTarget(draft) {
   if (draft.kind === 'transfer' && !normalizeAccount(draft.target)) return $('#exp-transfer-to');
   const warnings = (draft.warnings || []).join(' ');
   if (/信心較低/.test(warnings)) return $('#exp-desc');
-  if (/日期/.test(warnings)) return $('#exp-date');
+  if (/日期/.test(warnings)) return $('#exp-date-trigger');
   if (/(分攤|成員)/.test(warnings) && draft.kind !== 'transfer') return $('#split-equal');
   if (/(付款|收款)(人|來源|去向)|款項來源/.test(warnings)) return $('#exp-payer');
   if (/分類/.test(warnings)) return $('#exp-categories .chip') || $('#exp-desc');
@@ -1573,11 +1593,9 @@ function aiDraftFocusTarget(draft) {
 function applyAiDraft(result) {
   let { draft } = result;
   const draftSource = normalizeAccount(draft.source);
-  if (draft.kind !== 'transfer' && draftSource?.type === 'wallet'
+  if (draft.kind === 'income' && draftSource?.type === 'wallet'
     && !(draft.participantIds || []).length) {
-    const warning = draft.kind === 'income'
-      ? '帳本錢包收款需要選擇分配成員'
-      : '帳本錢包付款需要選擇分攤成員';
+    const warning = '帳本錢包收款需要選擇分配成員';
     draft = {
       ...draft,
       ready: false,
@@ -1601,7 +1619,7 @@ function applyAiDraft(result) {
 
   $('#exp-desc').value = draft.description || '';
   $('#exp-amount').value = draft.amount ?? '';
-  $('#exp-date').value = draft.expenseDate || todayLocal();
+  setDatePickerValue('exp-date', draft.expenseDate || todayLocal());
   $('#exp-note').value = draft.note || '';
   const sourceKey = accountKey(draft.source);
   setAccountOptions($('#exp-payer'), accountOptionsHtml(), {
@@ -1819,10 +1837,12 @@ setupSmartSpeechInput();
 function setStatsRange(from, to) {
   state.statsFrom = from;
   state.statsTo = to;
-  $('#stats-from').value = from;
-  $('#stats-to').value = to;
+  setDatePickerValue('stats-from', from);
+  setDatePickerValue('stats-to', to);
   $('#stats-from').max = to;
   $('#stats-to').min = from;
+  window.AppDatePicker?.sync('stats-from');
+  window.AppDatePicker?.sync('stats-to');
   renderStats();
   replayStatsBars();
 }
@@ -1939,7 +1959,7 @@ function selectedSourceAccount() {
 }
 
 function syncWalletSplitConstraint() {
-  const disallowNone = expenseKind !== 'transfer' && selectedSourceAccount()?.type === 'wallet';
+  const disallowNone = expenseKind === 'income' && selectedSourceAccount()?.type === 'wallet';
   const none = $('#split-none');
   none.classList.toggle('hidden', disallowNone);
   none.disabled = disallowNone;
@@ -2014,7 +2034,8 @@ $('#exp-payer').addEventListener('change', () => {
 $('#exp-transfer-to').addEventListener('change', syncAiReviewSummary);
 
 function setSplitMode(mode) {
-  if (mode === 'none' && selectedSourceAccount()?.type === 'wallet') mode = 'equal';
+  if (mode === 'none' && expenseKind === 'income'
+    && selectedSourceAccount()?.type === 'wallet') mode = 'equal';
   splitMode = mode;
   $('#split-equal').classList.toggle('active', mode === 'equal');
   $('#split-custom').classList.toggle('active', mode === 'custom');
@@ -2072,7 +2093,7 @@ function openExpenseModal(expense = null, { aiDraft = false, deferOpen = false }
   $('#form-expense').scrollTop = 0;
   $('#exp-desc').value = expense?.description || '';
   $('#exp-amount').value = expense ? expense.amount : '';
-  $('#exp-date').value = expense?.expense_date || todayLocal();
+  setDatePickerValue('exp-date', expense?.expense_date || todayLocal());
   $('#exp-note').value = expense?.note || '';
 
   const editingTransfer = !!expense && isTransfer(expense);
@@ -2123,7 +2144,8 @@ function openExpenseModal(expense = null, { aiDraft = false, deferOpen = false }
       && source?.type === 'member'
       && expense.splits[0].member_id === source.id
       && Math.abs(expense.splits[0].amount - expense.amount) < 0.011;
-    if (isSelfOnly) {
+    const isSharedWalletExpense = source?.type === 'wallet' && expense.splits.length === 0;
+    if (isSelfOnly || isSharedWalletExpense) {
       mode = 'none';
     } else {
       const checkedIds = splitMembers.filter((m) => splitMap.has(m.id)).map((m) => m.id);
@@ -2132,10 +2154,10 @@ function openExpenseModal(expense = null, { aiDraft = false, deferOpen = false }
       mode = isEqual ? 'equal' : 'custom';
     }
   }
-  setSplitMode(mode);
-
   // kind 要等付款人與分攤名單就緒後再設（轉帳模式會依付款人組出收款對象）
-  setKind(editingTransfer ? 'transfer' : expense?.kind === 'income' ? 'income' : 'expense');
+  const nextKind = editingTransfer ? 'transfer' : expense?.kind === 'income' ? 'income' : 'expense';
+  setKind(nextKind);
+  if (!editingTransfer) setSplitMode(mode);
   if (editingTransfer) renderTransferTargets(expenseTarget(expense));
 
   // 單據與刪除鈕
@@ -2386,9 +2408,12 @@ function updateSplitPreview() {
   });
   if (splitMode === 'none') {
     el.classList.remove('hidden');
-    el.textContent = expenseKind === 'income'
-      ? '這筆歸收款成員，不會影響其他人的結餘'
-      : '這筆由付款成員自行承擔，不會影響其他人的結餘';
+    const source = selectedSourceAccount();
+    el.textContent = source?.type === 'wallet' && expenseKind === 'expense'
+      ? '這筆會列為共同支出，不會計入任何成員的結餘'
+      : expenseKind === 'income'
+        ? '這筆歸收款成員，不會影響其他人的結餘'
+        : '這筆由付款成員自行承擔，不會影響其他人的結餘';
     syncAiReviewSummary();
     return;
   }
@@ -2461,7 +2486,7 @@ $('#modal-expense').addEventListener('cancel', async (event) => {
   await closeExpenseModal();
 });
 document.addEventListener('keydown', (ev) => {
-  if ($('#receipt-lightbox').open || $('#app-dialog').open) return;
+  if ($('#receipt-lightbox').open || $('#app-dialog').open || window.AppDatePicker?.isOpen()) return;
   const modal = $('#modal-expense');
   if (!modal.open || modal.classList.contains('closing')) return;
   if ((ev.metaKey || ev.ctrlKey) && ev.key === 'Enter' && !expenseSubmitting) {
@@ -2492,11 +2517,18 @@ function showSplitFormError(message, focusTarget) {
 }
 
 AppForm.bind($('#form-expense'));
+$('#exp-date').addEventListener('change', () => {
+  $('#exp-date-trigger').removeAttribute('aria-invalid');
+});
 $('#form-expense').addEventListener('submit', async (ev) => {
   ev.preventDefault();
   if (expenseSubmitting || expensePersisted) return;
   if (receiptTask) return toast('單據仍在處理，完成後即可儲存');
   if (!AppForm.validate(ev.currentTarget, { notify: toast })) return;
+  if (!$('#exp-date').value) {
+    AppForm.invalidate($('#exp-date-trigger'), '請選擇日期', { notify: toast });
+    return;
+  }
   const amount = Number($('#exp-amount').value);
   const source = selectedSourceAccount();
   if (!source) return toast('請選擇款項來源');
@@ -2531,11 +2563,7 @@ $('#form-expense').addEventListener('submit', async (ev) => {
 
     let splits;
     if (splitMode === 'none') {
-      if (source.type !== 'member') {
-        showSplitFormError('帳本錢包付款必須分攤給實際成員', $('#split-equal'));
-        return;
-      }
-      splits = [{ memberId: source.id, amount }];
+      splits = source.type === 'wallet' ? [] : [{ memberId: source.id, amount }];
     } else if (splitMode === 'equal') {
       const shares = equalSplit(amount, checkedRows.length);
       splits = checkedRows.map((r, i) => ({ memberId: r.dataset.id, amount: shares[i] }));

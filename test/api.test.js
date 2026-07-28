@@ -499,8 +499,104 @@ test('API protects access, validates money, and rejects stale updates', async (t
         splits: [],
       },
     });
-    assert.equal(walletWithoutSplits.response.status, 400);
-    assert.match(walletWithoutSplits.body.error, /至少選擇一位分攤成員/);
+    assert.equal(walletWithoutSplits.response.status, 200);
+    const sharedExpenseLedger = await request(`/api/groups/${groupId}`);
+    assert.equal(sharedExpenseLedger.body.wallet.balance, -60);
+    assert.equal(sharedExpenseLedger.body.wallet.positions[payerId], 0);
+    assert.equal(sharedExpenseLedger.body.wallet.positions[memberId], 0);
+    assert.equal(sharedExpenseLedger.body.wallet.sharedBalance, -60);
+    assert.equal(
+      sharedExpenseLedger.body.expenses
+        .find((entry) => entry.id === walletWithoutSplits.body.expenseId).splits.length,
+      0
+    );
+    assert.deepEqual(
+      sharedExpenseLedger.body.settlements.filter((item) => item.kind === 'wallet_top_up'),
+      []
+    );
+
+    const allocatedSharedExpense = await request(
+      `/api/groups/${groupId}/expenses/${walletWithoutSplits.body.expenseId}`,
+      {
+        method: 'PUT',
+        body: {
+          source: { type: 'wallet', id: walletId },
+          description: '改為成員分攤',
+          amount: 60,
+          category: '餐飲',
+          expenseDate: '2026-07-13',
+          kind: 'expense',
+          version: 1,
+          splits: [
+            { memberId: payerId, amount: 30 },
+            { memberId, amount: 30 },
+          ],
+        },
+      }
+    );
+    assert.equal(allocatedSharedExpense.response.status, 200);
+    const allocatedLedger = await request(`/api/groups/${groupId}`);
+    assert.equal(allocatedLedger.body.wallet.sharedBalance, 0);
+    assert.equal(allocatedLedger.body.wallet.positions[payerId], -30);
+    assert.equal(allocatedLedger.body.wallet.positions[memberId], -30);
+
+    const restoredSharedExpense = await request(
+      `/api/groups/${groupId}/expenses/${walletWithoutSplits.body.expenseId}`,
+      {
+        method: 'PUT',
+        body: {
+          source: { type: 'wallet', id: walletId },
+          description: '改回共同支出',
+          amount: 60,
+          category: '餐飲',
+          expenseDate: '2026-07-13',
+          kind: 'expense',
+          version: 2,
+          splits: [],
+        },
+      }
+    );
+    assert.equal(restoredSharedExpense.response.status, 200);
+    const restoredSharedLedger = await request(`/api/groups/${groupId}`);
+    assert.equal(restoredSharedLedger.body.wallet.sharedBalance, -60);
+    assert.equal(restoredSharedLedger.body.wallet.positions[payerId], 0);
+    assert.equal(restoredSharedLedger.body.wallet.positions[memberId], 0);
+
+    const memberWithoutSplits = await request(`/api/groups/${groupId}/expenses`, {
+      method: 'POST',
+      body: {
+        source: { type: 'member', id: payerId },
+        description: '成員缺少分攤',
+        amount: 10,
+        category: '餐飲',
+        expenseDate: '2026-07-13',
+        kind: 'expense',
+        splits: [],
+      },
+    });
+    assert.equal(memberWithoutSplits.response.status, 400);
+    assert.match(memberWithoutSplits.body.error, /至少選擇一位分攤成員/);
+
+    const walletIncomeWithoutSplits = await request(`/api/groups/${groupId}/expenses`, {
+      method: 'POST',
+      body: {
+        source: { type: 'wallet', id: walletId },
+        description: '公帳收入缺少分配',
+        amount: 10,
+        category: '其他',
+        expenseDate: '2026-07-13',
+        kind: 'income',
+        splits: [],
+      },
+    });
+    assert.equal(walletIncomeWithoutSplits.response.status, 400);
+    assert.match(walletIncomeWithoutSplits.body.error, /至少選擇一位分攤成員/);
+
+    const removedSharedExpense = await request(
+      `/api/groups/${groupId}/expenses/${walletWithoutSplits.body.expenseId}?version=3`,
+      { method: 'DELETE' }
+    );
+    assert.equal(removedSharedExpense.response.status, 200);
 
     const paid = await request(`/api/groups/${groupId}/expenses`, {
       method: 'POST',
@@ -524,6 +620,7 @@ test('API protects access, validates money, and rejects stale updates', async (t
     assert.equal(overdrawn.body.wallet.balance, -60);
     assert.equal(overdrawn.body.wallet.positions[payerId], -30);
     assert.equal(overdrawn.body.wallet.positions[memberId], -30);
+    assert.equal(overdrawn.body.wallet.sharedBalance, 0);
     assert.deepEqual(
       overdrawn.body.settlements
         .filter((item) => item.kind === 'wallet_top_up')
