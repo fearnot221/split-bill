@@ -1110,11 +1110,11 @@ function setSmartAnalyzing(analyzing) {
   progress.classList.toggle('hidden', !analyzing);
   progress.setAttribute('aria-hidden', String(!analyzing));
   if (analyzing) {
-    const title = updateSmartProgress();
-    setSmartFeedback(`${title}…`);
+    updateSmartProgress();
+    setSmartFeedback('');
     smartProgressTimers = [
-      setTimeout(() => setSmartFeedback(`${updateSmartProgress(1)}…`), 4500),
-      setTimeout(() => setSmartFeedback(`${updateSmartProgress(2)}…`), 12000),
+      setTimeout(() => updateSmartProgress(1), 4500),
+      setTimeout(() => updateSmartProgress(2), 12000),
     ];
     if (moveFocusToCancel) $('#btn-smart-analyze').focus({ preventScroll: true });
   }
@@ -1210,7 +1210,7 @@ async function setSmartReceiptFile(file) {
     if (sequence === smartReceiptSequence) {
       smartReceiptTask = null;
       syncSmartAnalyzeButton();
-      if (smartAnalyzing) setSmartFeedback(`${updateSmartProgress()}…`);
+      if (smartAnalyzing) updateSmartProgress();
     }
   }
 }

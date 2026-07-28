@@ -7,7 +7,7 @@
   <meta name="theme-color" content="#f5f3ee" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#191813" media="(prefers-color-scheme: dark)">
   <title>分帳小工具 — 記帳分帳</title>
-  <link rel="stylesheet" href="style.css?v=39">
+  <link rel="stylesheet" href="style.css?v=40">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%2344705a'/><text x='50' y='72' font-size='60' text-anchor='middle' fill='white' font-family='Helvetica,Arial,sans-serif' font-weight='bold'>$</text></svg>">
 </head>
 <body>
@@ -51,7 +51,8 @@
           <div id="smart-input-wrap" class="smart-input-wrap" aria-busy="false">
             <textarea id="smart-input" class="smart-input" rows="3" maxlength="2000" enterkeyhint="send"
               placeholder="例如：昨天晚餐 1,280，我付的，我跟小明、小美均分"></textarea>
-            <div id="smart-progress" class="smart-progress hidden" aria-hidden="true">
+            <div id="smart-progress" class="smart-progress hidden" role="status"
+              aria-live="polite" aria-atomic="true" aria-hidden="true">
               <span class="smart-progress-spinner"></span>
               <span class="smart-progress-copy">
                 <strong id="smart-progress-title">正在理解分帳內容</strong>
@@ -433,6 +434,6 @@
   <script src="ui-dialog.js?v=2"></script>
   <script src="ui-form.js?v=2"></script>
   <script src="ui-date-picker.js?v=1"></script>
-  <script src="app.js?v=61"></script>
+  <script src="app.js?v=62"></script>
 </body>
 </html>

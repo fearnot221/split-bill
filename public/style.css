@@ -1224,8 +1224,14 @@ select.app-select option { color: var(--ink); background: var(--card); }
   max-height: min(92%, 560px);
   overflow-y: auto;
   overscroll-behavior: contain;
+  scroll-padding-block: 108px 72px;
+  scrollbar-width: none;
 }
+.date-picker-surface::-webkit-scrollbar { display: none; }
 .date-picker__topbar {
+  position: sticky;
+  top: 0;
+  z-index: 3;
   display: flex;
   min-height: 48px;
   flex-shrink: 0;
@@ -1233,6 +1239,7 @@ select.app-select option { color: var(--ink); background: var(--card); }
   justify-content: space-between;
   gap: 16px;
   padding-bottom: 10px;
+  background: var(--card);
   border-bottom: 2px solid var(--rule-strong);
 }
 .date-picker__topbar h2 {
@@ -1248,12 +1255,16 @@ select.app-select option { color: var(--ink); background: var(--card); }
   height: 44px;
 }
 .date-picker__month-nav {
+  position: sticky;
+  top: 48px;
+  z-index: 2;
   display: grid;
   flex-shrink: 0;
   grid-template-columns: 44px minmax(0, 1fr) 44px;
   align-items: center;
   gap: 8px;
   padding: 10px 0 6px;
+  background: var(--card);
 }
 .date-picker__month-nav p {
   min-width: 0;
@@ -1323,12 +1334,17 @@ select.app-select option { color: var(--ink); background: var(--card); }
   outline-offset: -3px;
 }
 .date-picker__actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
   display: flex;
   flex-shrink: 0;
   justify-content: flex-end;
   gap: 8px;
   margin-top: 10px;
   padding-top: 12px;
+  padding-bottom: max(1px, env(safe-area-inset-bottom));
+  background: var(--card);
   border-top: 1px solid var(--rule);
 }
 .date-picker__actions .btn { min-height: 48px; flex: 1; }
@@ -1921,7 +1937,7 @@ select.app-select option { color: var(--ink); background: var(--card); }
 @keyframes toast-out { to { transform: translate(-50%, 8px); opacity: 0; } }
 
 /* ===== 平板 / 桌面 ===== */
-@media (min-width: 768px) {
+@media (min-width: 768px) and (min-height: 600px) {
   .container { max-width: 680px; }
   .group-header, .summary-wrap { max-width: 680px; }
 
@@ -1972,6 +1988,6 @@ select.app-select option { color: var(--ink); background: var(--card); }
   .toast { bottom: 48px; }
 }
 
-@media (min-width: 1100px) {
+@media (min-width: 1100px) and (min-height: 600px) {
   .fab { right: calc(50% - 340px - 76px); }
 }

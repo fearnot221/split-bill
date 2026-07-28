@@ -87,7 +87,7 @@ test('light and dark themes follow the operating system without a manual prefere
     assert.match(page, /<meta name="color-scheme" content="light dark">/);
     assert.match(page, /<meta name="theme-color" content="#f5f3ee" media="\(prefers-color-scheme: light\)">/);
     assert.match(page, /<meta name="theme-color" content="#191813" media="\(prefers-color-scheme: dark\)">/);
-    assert.match(page, /href="style\.css\?v=39"/);
+    assert.match(page, /href="style\.css\?v=40"/);
   }
   assert.match(styles, /:root \{[\s\S]*?color-scheme: light dark;/);
   assert.match(styles, /@media \(prefers-color-scheme: dark\) \{[\s\S]*?--paper: #191813;/);
@@ -143,6 +143,44 @@ test('all date fields use one accessible custom calendar dialog', () => {
   assert.match(styles, /\.date-picker-surface \{[\s\S]*?overflow-y: auto;/);
   assert.match(styles, /\.date-picker-trigger\[aria-invalid="true"\]/);
   assert.match(styles, /@media \(max-width: 360px\)[\s\S]+\.date-picker-surface/);
+});
+
+test('date picker stays reachable in short viewports and keeps 44px targets at 320px', () => {
+  const surfaceRule = styles.match(/\.date-picker-surface \{([^}]*)\}/)?.[1] || '';
+  assert.match(surfaceRule, /max-height: min\(92%, 560px\);/);
+  assert.match(surfaceRule, /overflow-y: auto;/);
+  assert.match(surfaceRule, /overscroll-behavior: contain;/);
+  assert.match(surfaceRule, /scroll-padding-block: 108px 72px;/);
+  assert.match(styles, /\.date-picker__topbar \{[^}]*position: sticky;[^}]*top: 0;/);
+  assert.match(styles, /\.date-picker__month-nav \{[^}]*position: sticky;[^}]*top: 48px;/);
+  assert.match(styles, /\.date-picker__actions \{[^}]*position: sticky;[^}]*bottom: 0;/);
+  assert.match(styles, /@media \(min-width: 768px\) and \(min-height: 600px\)/);
+  assert.doesNotMatch(styles, /@media \(min-width: 768px\) \{/);
+
+  const narrowSurfaceRule = styles.match(
+    /@media \(max-width: 360px\)[\s\S]*?\.date-picker-surface \{([^}]*)\}/
+  )?.[1] || '';
+  const leftPadding = Number(/padding-left: max\((\d+)px,/.exec(narrowSurfaceRule)?.[1]);
+  const rightPadding = Number(/padding-right: max\((\d+)px,/.exec(narrowSurfaceRule)?.[1]);
+  const appSurfaceRule = styles.match(/\.app-dialog__surface \{([^}]*)\}/)?.[1] || '';
+  const horizontalBorder = Number(/border: (\d+)px solid/.exec(appSurfaceRule)?.[1]) * 2;
+  const dayWidthAt320 = (320 - leftPadding - rightPadding - horizontalBorder) / 7;
+
+  assert.ok(Number.isFinite(dayWidthAt320));
+  assert.ok(dayWidthAt320 >= 44, `320px date target is only ${dayWidthAt320}px wide`);
+  assert.match(styles, /\.date-picker__day \{[^}]*min-height: 44px;/);
+});
+
+test('AI analysis exposes one live progress message without duplicating feedback', () => {
+  assert.match(
+    html,
+    /id="smart-progress"[^>]*role="status"[^>]*aria-live="polite"[^>]*aria-atomic="true"[^>]*aria-hidden="true"/
+  );
+  assert.match(
+    app,
+    /if \(analyzing\) \{\s*updateSmartProgress\(\);\s*setSmartFeedback\(''\);[\s\S]*?setTimeout\(\(\) => updateSmartProgress\(1\), 4500\)[\s\S]*?setTimeout\(\(\) => updateSmartProgress\(2\), 12000\)/
+  );
+  assert.doesNotMatch(app, /setSmartFeedback\(`\$\{updateSmartProgress\(/);
 });
 
 test('managed forms and tooltips avoid browser-native mobile popovers', () => {
