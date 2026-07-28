@@ -56,6 +56,7 @@ test('API protects access, validates money, and rejects stale updates', async (t
   let payerId;
   let memberId;
   let expenseId;
+  let walletId;
 
   await t.test('exposes a minimal unauthenticated health probe', async () => {
     const response = await fetch(`${baseUrl}/healthz`);
@@ -110,6 +111,10 @@ test('API protects access, validates money, and rejects stale updates', async (t
     assert.equal(ledger.body.members[0].id, payerId);
     assert.equal(ledger.body.members[0].name, '我');
     assert.equal(Object.hasOwn(ledger.body.members[0], 'is_fund'), false);
+    assert.equal(ledger.body.wallet.name, '公帳');
+    assert.equal(ledger.body.wallet.balance, 0);
+    assert.deepEqual(ledger.body.wallet.positions, { [payerId]: 0 });
+    walletId = ledger.body.wallet.id;
 
     const unauthorized = await request(`/api/groups/${groupId}`, {
       method: 'PATCH',
@@ -163,6 +168,16 @@ test('API protects access, validates money, and rejects stale updates', async (t
     assert.equal(deletedUnused.response.status, 200);
     assert.equal(deletedUnused.body.ok, true);
 
+    for (const reservedName of ['公帳', '公帳錢包', '帳本錢包', '錢包']) {
+      const reserved = await request(`/api/groups/${groupId}/members`, {
+        method: 'POST',
+        admin: true,
+        body: { name: reservedName },
+      });
+      assert.equal(reserved.response.status, 400, reservedName);
+      assert.match(reserved.body.error, /保留/, reservedName);
+    }
+
     const member = await request(`/api/groups/${groupId}/members`, {
       method: 'POST',
       admin: true,
@@ -206,6 +221,8 @@ test('API protects access, validates money, and rejects stale updates', async (t
     assert.equal(parsed.body.draft.amount, 1200);
     assert.equal(parsed.body.draft.category, '餐飲');
     assert.equal(parsed.body.draft.expenseDate, '2026-07-13');
+    assert.deepEqual(parsed.body.draft.source, { type: 'member', id: payerId });
+    assert.equal(parsed.body.draft.target, null);
     assert.deepEqual(new Set(parsed.body.draft.participantIds), new Set([payerId, memberId]));
     assert.match(parsed.body.notices.join(' '), /基本文字規則/);
 
@@ -216,6 +233,19 @@ test('API protects access, validates money, and rejects stale updates', async (t
     assert.equal(overview.body.aiUsage.local_requests, 1);
     assert.equal(overview.body.aiUsage.openai_requests, 0);
     assert.deepEqual(overview.body.aiUsage.errors, {});
+
+    const walletTransfer = await request(`/api/groups/${groupId}/ai/parse`, {
+      method: 'POST',
+      body: {
+        text: '我存入公帳 500',
+        defaultMemberId: payerId,
+        localDate: '2026-07-14',
+      },
+    });
+    assert.equal(walletTransfer.response.status, 200);
+    assert.equal(walletTransfer.body.draft.kind, 'transfer');
+    assert.deepEqual(walletTransfer.body.draft.source, { type: 'member', id: payerId });
+    assert.deepEqual(walletTransfer.body.draft.target, { type: 'wallet', id: walletId });
 
     const fakeReceipt = await request(`/api/groups/${groupId}/ai/parse`, {
       method: 'POST',
@@ -412,7 +442,12 @@ test('API protects access, validates money, and rejects stale updates', async (t
     assert.equal(ledger.response.status, 200);
     assert.equal(ledger.body.group.currency, 'NT$');
     assert.equal(ledger.body.total, 0.01);
-    assert.deepEqual(ledger.body.settlements, [{ from: memberId, to: payerId, amount: 0.01 }]);
+    assert.deepEqual(ledger.body.settlements, [{
+      kind: 'member_transfer',
+      from: { type: 'member', id: memberId },
+      to: { type: 'member', id: payerId },
+      amount: 0.01,
+    }]);
 
     const settled = await request(`/api/groups/${groupId}/expenses`, {
       method: 'POST',
@@ -430,6 +465,247 @@ test('API protects access, validates money, and rejects stale updates', async (t
     const afterSettlement = await request(`/api/groups/${groupId}`);
     assert.deepEqual(afterSettlement.body.settlements, []);
     assert.equal(afterSettlement.body.total, 0.01);
+  });
+
+  await t.test('keeps wallet cash, positions, and top-ups separate from member settlements', async () => {
+    const base = {
+      expenseDate: '2026-07-13',
+      amount: 100,
+      description: '存入帳本錢包',
+      category: '轉帳',
+      kind: 'transfer',
+    };
+    const conflictingLegacySource = await request(`/api/groups/${groupId}/expenses`, {
+      method: 'POST',
+      body: {
+        ...base,
+        payerId: memberId,
+        source: { type: 'member', memberId: payerId },
+        target: { type: 'wallet', walletId },
+      },
+    });
+    assert.equal(conflictingLegacySource.response.status, 400);
+    assert.match(conflictingLegacySource.body.error, /衝突|不一致/);
+
+    const walletWithoutSplits = await request(`/api/groups/${groupId}/expenses`, {
+      method: 'POST',
+      body: {
+        source: { type: 'wallet', id: walletId },
+        description: '缺少分攤',
+        amount: 60,
+        category: '餐飲',
+        expenseDate: '2026-07-13',
+        kind: 'expense',
+        splits: [],
+      },
+    });
+    assert.equal(walletWithoutSplits.response.status, 400);
+    assert.match(walletWithoutSplits.body.error, /至少選擇一位分攤成員/);
+
+    const paid = await request(`/api/groups/${groupId}/expenses`, {
+      method: 'POST',
+      body: {
+        source: { type: 'wallet', id: walletId },
+        description: '帳本錢包付晚餐',
+        amount: 60,
+        category: '餐飲',
+        expenseDate: '2026-07-13',
+        kind: 'expense',
+        splits: [
+          { memberId: payerId, amount: 30 },
+          { memberId, amount: 30 },
+        ],
+      },
+    });
+    assert.equal(paid.response.status, 200);
+
+    const overdrawn = await request(`/api/groups/${groupId}`);
+    assert.equal(overdrawn.response.status, 200);
+    assert.equal(overdrawn.body.wallet.balance, -60);
+    assert.equal(overdrawn.body.wallet.positions[payerId], -30);
+    assert.equal(overdrawn.body.wallet.positions[memberId], -30);
+    assert.deepEqual(
+      overdrawn.body.settlements
+        .filter((item) => item.kind === 'wallet_top_up')
+        .map((item) => [item.from.id, item.amount]),
+      [[payerId, 30], [memberId, 30]]
+    );
+
+    const deposit = await request(`/api/groups/${groupId}/expenses`, {
+      method: 'POST',
+      body: {
+        ...base,
+        source: { type: 'member', id: payerId },
+        target: { type: 'wallet', id: walletId },
+      },
+    });
+    assert.equal(deposit.response.status, 200);
+
+    const mixed = await request(`/api/groups/${groupId}`);
+    assert.equal(mixed.response.status, 200);
+    assert.equal(mixed.body.wallet.balance, 40);
+    assert.equal(mixed.body.wallet.positions[payerId], 70);
+    assert.equal(mixed.body.wallet.positions[memberId], -30);
+    const walletPaidEntry = mixed.body.expenses.find((entry) => entry.id === paid.body.expenseId);
+    assert.deepEqual(walletPaidEntry.source, { type: 'wallet', id: walletId });
+    assert.equal(walletPaidEntry.target, null);
+    const topUps = mixed.body.settlements.filter((item) => item.kind === 'wallet_top_up');
+    assert.deepEqual(topUps, [{
+      kind: 'wallet_top_up',
+      from: { type: 'member', id: memberId },
+      to: { type: 'wallet', id: walletId },
+      amount: 30,
+    }]);
+    assert.equal(
+      mixed.body.settlements.some((item) => item.from?.type === 'wallet'),
+      false,
+      'positive wallet credit must not be auto-refunded'
+    );
+
+    const income = await request(`/api/groups/${groupId}/expenses`, {
+      method: 'POST',
+      body: {
+        source: { type: 'wallet', id: walletId },
+        description: '帳本錢包收到退款',
+        amount: 10,
+        category: '其他',
+        expenseDate: '2026-07-13',
+        kind: 'income',
+        splits: [{ memberId, amount: 10 }],
+      },
+    });
+    assert.equal(income.response.status, 200);
+
+    const withdrawal = await request(`/api/groups/${groupId}/expenses`, {
+      method: 'POST',
+      body: {
+        source: { type: 'wallet', id: walletId },
+        target: { type: 'member', id: payerId },
+        description: '帳本錢包提款',
+        amount: 20,
+        category: '轉帳',
+        expenseDate: '2026-07-13',
+        kind: 'transfer',
+      },
+    });
+    assert.equal(withdrawal.response.status, 200);
+
+    const topUp = await request(`/api/groups/${groupId}/expenses`, {
+      method: 'POST',
+      body: {
+        ...base,
+        payerId: undefined,
+        amount: 20,
+        source: { type: 'member', id: memberId },
+        target: { type: 'wallet', id: walletId },
+      },
+    });
+    assert.equal(topUp.response.status, 200);
+    const toppedUp = await request(`/api/groups/${groupId}`);
+    assert.equal(toppedUp.body.wallet.balance, 50);
+    assert.equal(toppedUp.body.wallet.positions[payerId], 50);
+    assert.equal(toppedUp.body.wallet.positions[memberId], 0);
+    assert.equal(toppedUp.body.totalIncome, mixed.body.totalIncome + 10);
+    assert.equal(
+      toppedUp.body.settlements.some((item) => item.kind === 'wallet_top_up'),
+      false
+    );
+    const incomeEntry = toppedUp.body.expenses.find((entry) => entry.id === income.body.expenseId);
+    const withdrawalEntry = toppedUp.body.expenses
+      .find((entry) => entry.id === withdrawal.body.expenseId);
+    assert.deepEqual(incomeEntry.source, { type: 'wallet', id: walletId });
+    assert.equal(incomeEntry.target, null);
+    assert.deepEqual(withdrawalEntry.source, { type: 'wallet', id: walletId });
+    assert.deepEqual(withdrawalEntry.target, { type: 'member', id: payerId });
+
+    const removedTopUp = await request(
+      `/api/groups/${groupId}/expenses/${topUp.body.expenseId}?version=1`,
+      { method: 'DELETE' }
+    );
+    assert.equal(removedTopUp.response.status, 200);
+    const withoutTopUp = await request(`/api/groups/${groupId}`);
+    assert.equal(withoutTopUp.body.wallet.balance, 30);
+    assert.equal(withoutTopUp.body.wallet.positions[payerId], 50);
+    assert.equal(withoutTopUp.body.wallet.positions[memberId], -20);
+    assert.deepEqual(
+      withoutTopUp.body.settlements.filter((item) => item.kind === 'wallet_top_up'),
+      [{
+        kind: 'wallet_top_up',
+        from: { type: 'member', id: memberId },
+        to: { type: 'wallet', id: walletId },
+        amount: 20,
+      }]
+    );
+
+    const restoredTopUp = await request(`/api/admin/expenses/${topUp.body.expenseId}/restore`, {
+      method: 'POST',
+      admin: true,
+    });
+    assert.equal(restoredTopUp.response.status, 200);
+    const afterRestore = await request(`/api/groups/${groupId}`);
+    assert.equal(afterRestore.body.wallet.balance, 50);
+    assert.equal(afterRestore.body.wallet.positions[memberId], 0);
+    assert.equal(
+      afterRestore.body.expenses.find((entry) => entry.id === topUp.body.expenseId).version,
+      3
+    );
+
+    const removedIncome = await request(
+      `/api/groups/${groupId}/expenses/${income.body.expenseId}?version=1`,
+      { method: 'DELETE' }
+    );
+    assert.equal(removedIncome.response.status, 200);
+    const withoutIncome = await request(`/api/groups/${groupId}`);
+    assert.equal(withoutIncome.body.wallet.balance, 40);
+    assert.equal(withoutIncome.body.wallet.positions[payerId], 50);
+    assert.equal(withoutIncome.body.wallet.positions[memberId], -10);
+    assert.equal(
+      withoutIncome.body.settlements.find((item) => item.kind === 'wallet_top_up').amount,
+      10
+    );
+    const permanentlyDeleted = await request(`/api/admin/expenses/${income.body.expenseId}`, {
+      method: 'DELETE',
+      admin: true,
+    });
+    assert.equal(permanentlyDeleted.response.status, 200);
+    const afterPermanentDelete = await request(`/api/groups/${groupId}`);
+    assert.equal(afterPermanentDelete.body.wallet.balance, 40);
+    assert.equal(afterPermanentDelete.body.wallet.positions[memberId], -10);
+    assert.equal(
+      afterPermanentDelete.body.expenses.some((entry) => entry.id === income.body.expenseId),
+      false
+    );
+
+    const removedDeposit = await request(
+      `/api/groups/${groupId}/expenses/${deposit.body.expenseId}?version=1`,
+      { method: 'DELETE' }
+    );
+    assert.equal(removedDeposit.response.status, 200);
+    const afterEntryDelete = await request(`/api/groups/${groupId}`);
+    assert.equal(afterEntryDelete.body.wallet.balance, -60);
+    assert.equal(afterEntryDelete.body.wallet.positions[payerId], -50);
+    assert.equal(afterEntryDelete.body.wallet.positions[memberId], -10);
+    assert.deepEqual(
+      afterEntryDelete.body.settlements
+        .filter((item) => item.kind === 'wallet_top_up')
+        .map((item) => [item.from.id, item.amount]),
+      [[payerId, 50], [memberId, 10]]
+    );
+
+    for (const [id, version] of [
+      [paid.body.expenseId, 1],
+      [withdrawal.body.expenseId, 1],
+      [topUp.body.expenseId, 3],
+    ]) {
+      const removed = await request(`/api/groups/${groupId}/expenses/${id}?version=${version}`, {
+        method: 'DELETE',
+      });
+      assert.equal(removed.response.status, 200);
+    }
+    const cleaned = await request(`/api/groups/${groupId}`);
+    assert.equal(cleaned.body.wallet.balance, 0);
+    assert.equal(cleaned.body.wallet.positions[payerId], 0);
+    assert.equal(cleaned.body.wallet.positions[memberId], 0);
   });
 
   await t.test('uses optimistic versions for edits', async () => {

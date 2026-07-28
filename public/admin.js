@@ -59,6 +59,55 @@ function escapeHtml(s) {
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+function normalizeAccount(account) {
+  if (!account || typeof account !== 'object') return null;
+  if (account.type === 'member') {
+    const id = account.id || account.memberId;
+    return id ? { type: 'member', id } : null;
+  }
+  if (account.type === 'wallet') {
+    const id = account.id || account.walletId;
+    return id ? { type: 'wallet', id } : null;
+  }
+  return null;
+}
+
+function accountName(account) {
+  const normalized = normalizeAccount(account);
+  if (!normalized) return '?';
+  if (normalized.type === 'wallet') return '帳本錢包';
+  return overview?.members.find((member) => member.id === normalized.id)?.name || '?';
+}
+
+function splitNames(expense) {
+  if (Array.isArray(expense.splits)) {
+    return expense.splits.map((split) => {
+      const id = split.memberId || split.member_id;
+      return overview?.members.find((member) => member.id === id)?.name || '?';
+    });
+  }
+  return Array.isArray(expense.split_names) ? expense.split_names : [];
+}
+
+function deletedEntryMeta(expense) {
+  const source = normalizeAccount(expense.source);
+  const target = normalizeAccount(expense.target);
+  if (expense.kind === 'transfer') {
+    if (source?.type === 'member' && target?.type === 'wallet') {
+      return `${accountName(source)} 存入帳本錢包 ${fmt(expense.amount)}`;
+    }
+    if (source?.type === 'wallet' && target?.type === 'member') {
+      return `帳本錢包支付 ${accountName(target)} ${fmt(expense.amount)}`;
+    }
+    return `${accountName(source)} 轉給 ${accountName(target)} ${fmt(expense.amount)}`;
+  }
+  const names = splitNames(expense).join('、');
+  const flow = source?.type === 'wallet'
+    ? (expense.kind === 'income' ? '收入存入帳本錢包' : '帳本錢包付款')
+    : `${accountName(source)} ${expense.kind === 'income' ? '收款' : '付款'}`;
+  return `${flow} ${fmt(expense.amount)}｜${expense.kind === 'income' ? '分配' : '分攤'}：${names}`;
+}
+
 async function api(url, options = {}) {
   const res = await fetch(url, {
     headers: { 'Content-Type': 'application/json' },
@@ -115,9 +164,19 @@ async function loadPanel() {
   const currencyInput = $('#ledger-currency');
   if (document.activeElement !== currencyInput) currencyInput.value = overview.group.currency;
   renderAiUsage();
+  renderWallet();
   renderMembers();
   renderCats();
   renderTrash();
+}
+
+function renderWallet() {
+  const wallet = overview.wallet || overview.group?.wallet;
+  $('#admin-wallet').innerHTML = wallet ? `
+    <li>
+      <span class="member-name-row">帳本錢包</span>
+      <span class="member-tag">共同資金</span>
+    </li>` : '';
 }
 
 function renderAiUsage() {
@@ -167,7 +226,7 @@ async function reloadPanel(successMessage) {
 
 function renderMembers() {
   $('#admin-members').innerHTML = overview.members.map((m) => {
-    const records = m.paid_count + m.split_count;
+    const records = m.paid_count + m.split_count + (m.transfer_count || 0);
     const deleteReason = overview.members.length <= 1
       ? '帳本至少需要保留一位成員'
       : records > 0 ? '有帳務紀錄，無法刪除' : '';
@@ -271,20 +330,22 @@ function renderTrash() {
   const list = $('#admin-trash');
   $('#trash-empty').classList.toggle('hidden', overview.deleted.length > 0);
   $('#btn-clear-trash').classList.toggle('hidden', overview.deleted.length === 0);
-  list.innerHTML = overview.deleted.map((e) => `
-    <li class="expense-item transfer" data-id="${e.id}">
-      <div class="expense-info">
-        <div class="expense-desc">${escapeHtml(e.description)}
-          <span class="member-tag">${escapeHtml(e.category)}</span></div>
-        <div class="expense-meta">${e.expense_date}｜${escapeHtml(e.payer_name)} ${e.kind === 'income' ? '收款' : '付款'} ${fmt(e.amount)}｜
-          分攤：${escapeHtml(e.split_names.join('、'))}｜刪於 ${fmtTime(e.deleted_at)}</div>
-        ${e.note ? `<div class="expense-note">${escapeHtml(e.note)}</div>` : ''}
-      </div>
-      <span class="admin-actions">
-        <button type="button" class="pill-btn act-restore">復原</button>
-        <button type="button" class="pill-btn danger act-purge">永久刪除</button>
-      </span>
-    </li>`).join('');
+  list.innerHTML = overview.deleted.map((e) => {
+    const meta = deletedEntryMeta(e);
+    return `
+      <li class="expense-item transfer" data-id="${e.id}">
+        <div class="expense-info">
+          <div class="expense-desc">${escapeHtml(e.description)}
+            <span class="member-tag">${escapeHtml(e.category)}</span></div>
+          <div class="expense-meta">${e.expense_date}｜${escapeHtml(meta)}｜刪於 ${fmtTime(e.deleted_at)}</div>
+          ${e.note ? `<div class="expense-note">${escapeHtml(e.note)}</div>` : ''}
+        </div>
+        <span class="admin-actions">
+          <button type="button" class="pill-btn act-restore">復原</button>
+          <button type="button" class="pill-btn danger act-purge">永久刪除</button>
+        </span>
+      </li>`;
+  }).join('');
 
   $$('#admin-trash .act-restore').forEach((btn) => {
     btn.addEventListener('click', async () => {
@@ -302,7 +363,7 @@ function renderTrash() {
       const exp = overview.deleted.find((e) => e.id === li.dataset.id);
       if (!await AppDialog.confirm({
         title: '永久刪除帳目',
-        message: `「${exp.description}」｜${exp.expense_date}｜${exp.payer_name} ${fmt(exp.amount)}。刪除後將無法復原。`,
+        message: `「${exp.description}」｜${exp.expense_date}｜${deletedEntryMeta(exp)}。刪除後將無法復原。`,
         confirmLabel: '永久刪除',
         tone: 'danger',
       })) return;

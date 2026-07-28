@@ -757,18 +757,34 @@ select.app-select option { color: var(--ink); background: var(--card); }
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 12px;
+  min-width: 0;
   padding: 12px 0;
   border-bottom: 1px solid var(--rule);
 }
 .balance-amount {
+  flex: 0 0 auto;
+  max-width: 58%;
+  text-align: right;
   font-family: var(--mono);
   font-variant-numeric: tabular-nums;
   font-weight: 600;
   font-size: .92rem;
+  line-height: 1.35;
+  white-space: nowrap;
 }
 .balance-amount.positive { color: var(--green); }
 .balance-amount.negative { color: var(--red); }
 .balance-amount.zero { color: var(--sub); font-weight: 500; }
+#wallet-balance-list > li:first-child {
+  padding-block: 14px;
+  border-bottom-color: var(--rule-strong);
+}
+#wallet-balance-list > li:first-child .balance-amount { font-size: 1rem; }
+#wallet-balance-list > li:not(:first-child) .member-name-row {
+  color: var(--sub);
+  font-weight: 550;
+}
 
 .settlement-list li {
   display: flex;
@@ -787,20 +803,25 @@ select.app-select option { color: var(--ink); background: var(--card); }
   min-width: 0;
 }
 .settle-party {
+  flex: 1 1 0;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.settle-arrow { color: var(--sub); }
+.settle-arrow { flex: 0 0 auto; color: var(--sub); }
 .settle-amount {
+  flex: 0 0 auto;
   margin-left: auto;
   font-family: var(--mono);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .settle-done {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 5px;
   background: none;
   color: var(--ink);
@@ -815,7 +836,15 @@ select.app-select option { color: var(--ink); background: var(--card); }
 .settle-done svg { width: 12px; height: 12px; }
 .settle-done:hover { background: var(--fill); }
 
-.member-name-row { display: flex; align-items: center; gap: 10px; font-weight: 600; }
+.member-name-row {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
 .member-tag {
   font-size: .66rem;
   font-weight: 700;
@@ -1520,6 +1549,13 @@ select.app-select option { color: var(--ink); background: var(--card); }
     overflow-wrap: anywhere;
   }
   .member-tag { flex-shrink: 0; }
+  .balance-list li {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+  }
+  .balance-list .member-name-row { align-self: center; }
+  .balance-list .balance-amount { max-width: none; align-self: center; }
   .admin-actions {
     width: 100%;
     margin-left: 0;
@@ -1588,6 +1624,73 @@ select.app-select option { color: var(--ink); background: var(--card); }
   }
   .split-header .seg-btn { min-height: 44px; padding-block: 6px; }
   #split-toggle-all { min-height: 44px; }
+  select.app-select {
+    min-height: 52px;
+    padding-left: 14px;
+    padding-right: 54px;
+    background-position: right 19px center;
+  }
+  .app-dialog--sheet .modal-card {
+    max-width: none;
+    max-height: 94%;
+    padding-top: 16px;
+    padding-left: max(16px, calc(8px + env(safe-area-inset-left)));
+    padding-right: max(16px, calc(8px + env(safe-area-inset-right)));
+    padding-bottom: calc(16px + env(safe-area-inset-bottom));
+    border-inline: 0;
+  }
+  .app-dialog--sheet .modal-header { margin-bottom: 14px; }
+  .app-dialog--sheet #form-expense {
+    padding-right: 2px;
+    overscroll-behavior: contain;
+  }
+  .app-dialog--sheet .modal-actions .btn { min-height: 48px; }
+  .settlement-list li {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+  .settle-main {
+    display: grid;
+    width: 100%;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    gap: 4px 8px;
+  }
+  .settle-party {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .settle-amount {
+    grid-column: 1 / -1;
+    justify-self: end;
+    margin-left: 0;
+  }
+  .settle-done {
+    width: 100%;
+    min-height: 44px;
+  }
+}
+
+@media (max-width: 360px) {
+  .balance-list li { grid-template-columns: minmax(0, 1fr); }
+  .balance-list .balance-amount {
+    max-width: 100%;
+    justify-self: end;
+  }
+  .row-2 { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .split-header {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .split-header .seg { width: 100%; }
+  .split-header .seg-btn {
+    min-width: 0;
+    flex: 1;
+    padding-inline: 6px;
+  }
 }
 
 /* ===== Toast ===== */

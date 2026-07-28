@@ -34,10 +34,12 @@ function receiptResponse(overrides = {}, usage = {}) {
       category: '餐飲',
       expenseDate: '2026-07-14',
       payerName: '我',
+      payerAccountType: 'member',
       participantNames: ['我'],
       splitMode: 'none',
       customSplits: [],
       transferToName: null,
+      transferToAccountType: null,
       note: null,
       confidence: 0.95,
       warnings: [],
@@ -56,6 +58,14 @@ test('defines a strict structured-output schema', () => {
     new Set(Object.keys(AI_DRAFT_SCHEMA.properties))
   );
   assert.equal(AI_DRAFT_SCHEMA.properties.customSplits.items.additionalProperties, false);
+  assert.deepEqual(
+    AI_DRAFT_SCHEMA.properties.payerAccountType.enum,
+    ['member', 'public_wallet', null]
+  );
+  assert.deepEqual(
+    AI_DRAFT_SCHEMA.properties.transferToAccountType.enum,
+    ['member', 'public_wallet', null]
+  );
 });
 
 test('local parser understands an equal split with relative date', () => {
@@ -180,6 +190,189 @@ test('local parser identifies a transfer target', () => {
       ...context, today: '2026-07-14', hasReceipt: false,
     });
     assert.equal(ordinary.kind, 'expense', ordinaryText);
+  }
+});
+
+test('treats the public wallet as an account, never as a split member', () => {
+  const walletContext = {
+    ...context,
+    wallet: { id: 'wallet', name: '公帳' },
+    today: '2026-07-14',
+  };
+
+  for (const text of ['我存入公帳 500', '我存入帳本錢包 500', '我轉500給錢包']) {
+    const draft = normalizeDraft(
+      localParse(text, { ...walletContext, hasReceipt: false }),
+      { ...walletContext, sourceText: text }
+    );
+    assert.equal(draft.ready, true, text);
+    assert.equal(draft.kind, 'transfer', text);
+    assert.equal(draft.payerSource, 'member', text);
+    assert.equal(draft.payerId, 'me', text);
+    assert.equal(draft.payerWalletId, null, text);
+    assert.equal(draft.transferToSource, 'wallet', text);
+    assert.equal(draft.transferToId, null, text);
+    assert.equal(draft.transferToWalletId, 'wallet', text);
+    assert.equal(draft.amount, 500, text);
+    assert.deepEqual(draft.participantIds, [], text);
+  }
+
+  for (const text of ['公帳付晚餐 600，大家均分', '帳本錢包支付晚餐600，全員均分']) {
+    const draft = normalizeDraft(
+      localParse(text, { ...walletContext, hasReceipt: false }),
+      { ...walletContext, sourceText: text }
+    );
+    assert.equal(draft.ready, true, text);
+    assert.equal(draft.kind, 'expense', text);
+    assert.equal(draft.payerSource, 'wallet', text);
+    assert.equal(draft.payerId, null, text);
+    assert.equal(draft.payerWalletId, 'wallet', text);
+    assert.deepEqual(draft.participantIds, ['me', 'ming', 'mei'], text);
+    assert.equal(draft.splitMode, 'equal', text);
+  }
+});
+
+test('requires wallet allocations and gives an exact member name priority over wallet aliases', () => {
+  const walletContext = {
+    ...context,
+    wallet: { id: 'wallet', name: '公帳' },
+    today: '2026-07-14',
+  };
+  const missingAllocation = normalizeDraft({
+    isLedgerEntry: true,
+    kind: 'expense',
+    description: '晚餐',
+    amount: 600,
+    category: '餐飲',
+    expenseDate: '2026-07-14',
+    payerName: '帳本錢包',
+    participantNames: [],
+    splitMode: 'none',
+    customSplits: [],
+    transferToName: null,
+    note: null,
+    confidence: 0.9,
+    warnings: [],
+  }, { ...walletContext, sourceText: '帳本錢包付晚餐 600' });
+  assert.equal(missingAllocation.payerSource, 'wallet');
+  assert.equal(missingAllocation.ready, false);
+  assert.deepEqual(missingAllocation.participantIds, []);
+  assert.match(missingAllocation.warnings.join(' '), /至少一位分攤成員/);
+
+  const namedMemberContext = {
+    ...walletContext,
+    members: [...walletContext.members, { id: 'human-public', name: '公帳' }],
+  };
+  const namedMemberText = '公帳付晚餐 600，不分攤';
+  const namedMember = normalizeDraft(
+    localParse(namedMemberText, { ...namedMemberContext, hasReceipt: false }),
+    { ...namedMemberContext, sourceText: namedMemberText }
+  );
+  assert.equal(namedMember.payerSource, 'member');
+  assert.equal(namedMember.payerId, 'human-public');
+  assert.equal(namedMember.payerWalletId, null);
+  assert.deepEqual(namedMember.participantIds, ['human-public']);
+  assert.equal(namedMember.ready, true);
+
+  const explicitWalletText = '帳本錢包付晚餐 600，大家均分';
+  const explicitWallet = normalizeDraft(
+    localParse(explicitWalletText, { ...namedMemberContext, hasReceipt: false }),
+    { ...namedMemberContext, sourceText: explicitWalletText }
+  );
+  assert.equal(explicitWallet.payerSource, 'wallet');
+  assert.equal(explicitWallet.payerWalletId, 'wallet');
+  assert.deepEqual(
+    explicitWallet.participantIds,
+    namedMemberContext.members.map((member) => member.id)
+  );
+});
+
+test('account type hints disambiguate a wallet from a real member with the same name', () => {
+  const collisionContext = {
+    ...context,
+    members: [...context.members, { id: 'human-public', name: '公帳' }],
+    wallet: { id: 'wallet', name: '公帳' },
+    today: '2026-07-14',
+  };
+  const base = {
+    isLedgerEntry: true,
+    kind: 'expense',
+    description: '晚餐',
+    amount: 600,
+    category: '餐飲',
+    expenseDate: '2026-07-14',
+    participantNames: ['我'],
+    splitMode: 'equal',
+    customSplits: [],
+    transferToName: null,
+    transferToAccountType: null,
+    note: null,
+    confidence: 0.9,
+    warnings: [],
+  };
+
+  const walletPayer = normalizeDraft({
+    ...base,
+    payerName: '公帳',
+    payerAccountType: 'public_wallet',
+  }, collisionContext);
+  assert.equal(walletPayer.payerSource, 'wallet');
+  assert.equal(walletPayer.payerWalletId, 'wallet');
+
+  const memberPayer = normalizeDraft({
+    ...base,
+    payerName: '公帳',
+    payerAccountType: 'member',
+  }, collisionContext);
+  assert.equal(memberPayer.payerSource, 'member');
+  assert.equal(memberPayer.payerId, 'human-public');
+
+  const walletTarget = normalizeDraft({
+    ...base,
+    kind: 'transfer',
+    category: null,
+    payerName: '我',
+    payerAccountType: 'member',
+    participantNames: [],
+    splitMode: 'none',
+    transferToName: '公帳',
+    transferToAccountType: 'public_wallet',
+  }, collisionContext);
+  assert.equal(walletTarget.transferToSource, 'wallet');
+  assert.equal(walletTarget.transferToWalletId, 'wallet');
+
+  const request = buildOpenAIRequest({
+    model: 'gpt-5.6-sol',
+    text: '帳本錢包付晚餐 600',
+    receiptDataUrl: null,
+    context: collisionContext,
+    today: '2026-07-14',
+    safetyIdentifier: 'ledger_test',
+  });
+  assert.match(request.instructions, /payerAccountType.*public_wallet/);
+  assert.match(request.instructions, /單獨提到此名稱時一律視為 member/);
+});
+
+test('local parser keeps a longer member name ahead of embedded wallet aliases', () => {
+  for (const [id, name] of [
+    ['small-wallet', '小錢包'],
+    ['digital-wallet', '電子錢包'],
+    ['family-wallet', '家庭公帳錢包'],
+  ]) {
+    const namedContext = {
+      ...context,
+      members: [...context.members, { id, name }],
+      wallet: { id: 'wallet', name: '公帳' },
+      today: '2026-07-14',
+    };
+    const text = `${name}付晚餐 600，大家均分`;
+    const raw = localParse(text, { ...namedContext, hasReceipt: false });
+    const draft = normalizeDraft(raw, { ...namedContext, sourceText: text });
+    assert.equal(raw.payerName, name, name);
+    assert.equal(raw.payerAccountType, 'member', name);
+    assert.equal(draft.payerSource, 'member', name);
+    assert.equal(draft.payerId, id, name);
+    assert.equal(draft.ready, true, name);
   }
 });
 
@@ -580,6 +773,34 @@ test('normalizer rejects unknown members and unsafe custom totals', () => {
   assert.match(incomplete.warnings.join(' '), /分類/);
 });
 
+test('an explicitly unknown payer stays unresolved instead of becoming the default member', () => {
+  const draft = normalizeDraft({
+    isLedgerEntry: true,
+    kind: 'expense',
+    description: '晚餐',
+    amount: 300,
+    category: '餐飲',
+    expenseDate: '2026-07-14',
+    payerName: '不存在的付款人',
+    payerAccountType: 'member',
+    participantNames: ['我'],
+    splitMode: 'equal',
+    customSplits: [],
+    transferToName: null,
+    transferToAccountType: null,
+    note: null,
+    confidence: 0.9,
+    warnings: [],
+  }, { ...context, today: '2026-07-14' });
+
+  assert.equal(draft.ready, false);
+  assert.equal(draft.payerSource, null);
+  assert.equal(draft.payerId, null);
+  assert.equal(draft.payerWalletId, null);
+  assert.deepEqual(draft.participantIds, ['me']);
+  assert.match(draft.warnings.join(' '), /找不到付款／收款人/);
+});
+
 test('explicit participants override inferred splits while preserving exact custom splits', () => {
   const selectedContext = {
     ...context,
@@ -680,6 +901,7 @@ test('OpenAI instructions describe explicit participants by name without member 
       { id: 'private-id-ming', name: '小明' },
       { id: 'private-id-mei', name: '小美' },
     ],
+    wallet: { id: 'private-wallet-id', name: '公帳' },
     defaultMemberId: 'private-id-owner',
     explicitParticipantIds: ['private-id-ming'],
   };
@@ -696,6 +918,8 @@ test('OpenAI instructions describe explicit participants by name without member 
   for (const member of privateContext.members) {
     assert.equal(serializedRequest.includes(member.id), false, member.id);
   }
+  assert.equal(serializedRequest.includes(privateContext.wallet.id), false);
+  assert.match(request.instructions, /公帳|帳本錢包/);
   assert.doesNotMatch(serializedRequest, /is_fund|public_fund/);
 });
 
@@ -823,6 +1047,41 @@ test('uses low-detail vision first and upgrades only incomplete receipt drafts',
     cachedInputTokens: 0,
     outputTokens: 2,
   });
+});
+
+test('receipt merging keeps a wallet entry without real participants unready', async () => {
+  const walletContext = {
+    ...context,
+    wallet: { id: 'wallet', name: '公帳' },
+  };
+  let requestCount = 0;
+  const result = await analyzeWithOpenAI({
+    client: {
+      responses: {
+        create: async () => {
+          requestCount += 1;
+          return receiptResponse({
+            payerName: '公帳',
+            payerAccountType: 'public_wallet',
+            participantNames: [],
+            splitMode: 'none',
+          });
+        },
+      },
+    },
+    model: 'gpt-5.6-sol',
+    text: '',
+    receiptDataUrl: 'data:image/jpeg;base64,/9j/',
+    context: walletContext,
+    today: '2026-07-14',
+    safetyIdentifier: 'ledger_test',
+  });
+
+  assert.equal(requestCount, 1);
+  assert.equal(result.draft.payerSource, 'wallet');
+  assert.deepEqual(result.draft.participantIds, []);
+  assert.equal(result.draft.ready, false);
+  assert.match(result.draft.warnings.join(' '), /至少一位分攤成員/);
 });
 
 test('returns the low-detail receipt draft when its high-detail upgrade fails', async () => {

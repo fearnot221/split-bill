@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#f5f3ee" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#191813" media="(prefers-color-scheme: dark)">
   <title>分帳小工具 — 記帳分帳</title>
-  <link rel="stylesheet" href="style.css?v=36">
+  <link rel="stylesheet" href="style.css?v=37">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%2344705a'/><text x='50' y='72' font-size='60' text-anchor='middle' fill='white' font-family='Helvetica,Arial,sans-serif' font-weight='bold'>$</text></svg>">
 </head>
 <body>
@@ -118,7 +118,7 @@
         <div class="filter-bar">
           <div class="filter-search-row">
             <label class="visually-hidden" for="filter-text">搜尋紀錄</label>
-            <input type="search" id="filter-text" placeholder="搜尋說明、付款人…" autocomplete="off">
+            <input type="search" id="filter-text" placeholder="搜尋說明、成員或錢包…" autocomplete="off">
             <button type="button" id="btn-toggle-filters" class="icon-btn filter-toggle"
               aria-label="展開進階篩選" aria-expanded="false" aria-controls="filter-options"
               data-tooltip="篩選">
@@ -145,6 +145,10 @@
 
       <!-- 結算 -->
       <section id="tab-settle" class="tab-panel hidden">
+        <div id="wallet-balance-card" class="card hidden">
+          <h2>帳本錢包</h2>
+          <ul id="wallet-balance-list" class="balance-list"></ul>
+        </div>
         <div class="card">
           <h2>成員結餘</h2>
           <ul id="balance-list" class="balance-list"></ul>
@@ -152,7 +156,7 @@
         <div class="card">
           <h2>結算方案</h2>
           <ul id="settlement-list" class="settlement-list"></ul>
-          <p id="settle-empty" class="empty-hint hidden">目前大家互不相欠</p>
+          <p id="settle-empty" class="empty-hint hidden">目前已全部結清</p>
         </div>
       </section>
 
@@ -199,7 +203,7 @@
           <p id="stats-empty" class="empty-hint hidden">這段期間沒有支出紀錄</p>
         </div>
         <div class="card">
-          <h2>成員統計</h2>
+          <h2>成員分攤</h2>
           <ul id="member-stats" class="bar-list"></ul>
         </div>
       </section>
@@ -267,11 +271,11 @@
         </div>
         <label id="label-cats">分類</label>
         <div id="exp-categories" class="chip-row" role="group" aria-labelledby="label-cats"></div>
-        <label id="label-payer" class="select-field">付款人
+        <label id="label-payer" class="select-field">付款來源
           <select id="exp-payer" class="app-select"></select>
         </label>
-        <label id="label-transfer-to" class="select-field hidden">匯給
-          <select id="exp-transfer-to" class="app-select" data-validation-label="收款對象"></select>
+        <label id="label-transfer-to" class="select-field hidden">轉入對象
+          <select id="exp-transfer-to" class="app-select" data-validation-label="轉入對象"></select>
         </label>
         <div class="split-header">
           <label>分攤方式</label>
@@ -346,6 +350,6 @@
 
   <script src="ui-dialog.js?v=2"></script>
   <script src="ui-form.js?v=2"></script>
-  <script src="app.js?v=56"></script>
+  <script src="app.js?v=60"></script>
 </body>
 </html>

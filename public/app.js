@@ -250,14 +250,95 @@ function memberName(id) {
   return m ? m.name : '?';
 }
 
+function ledgerWallet() {
+  return state.data?.wallet || state.data?.group?.wallet || null;
+}
+
+function normalizeAccount(account) {
+  if (!account || typeof account !== 'object') return null;
+  if (account.type === 'member') {
+    const id = account.id || account.memberId;
+    return id ? { type: 'member', id } : null;
+  }
+  if (account.type === 'wallet') {
+    const id = account.id || account.walletId;
+    return id ? { type: 'wallet', id } : null;
+  }
+  return null;
+}
+
+function accountKey(account) {
+  const normalized = normalizeAccount(account);
+  return normalized ? `${normalized.type}:${normalized.id}` : '';
+}
+
+function accountFromKey(value) {
+  if (typeof value !== 'string') return null;
+  const separator = value.indexOf(':');
+  if (separator < 1) return null;
+  const type = value.slice(0, separator);
+  const id = value.slice(separator + 1);
+  if (type === 'member' && state.data?.members.some((member) => member.id === id)) {
+    return { type, id };
+  }
+  if (type === 'wallet' && ledgerWallet()?.id === id) return { type, id };
+  return null;
+}
+
+function accountPayload(account) {
+  const normalized = normalizeAccount(account);
+  if (!normalized) return null;
+  return normalized;
+}
+
+function accountName(account) {
+  const normalized = normalizeAccount(account);
+  if (!normalized) return '?';
+  return normalized.type === 'wallet' ? '帳本錢包' : memberName(normalized.id);
+}
+
+function expenseSource(expense) {
+  return normalizeAccount(expense?.source);
+}
+
+function expenseTarget(expense) {
+  return normalizeAccount(expense?.target);
+}
+
+function accountOptionsHtml({ exclude = '' } = {}) {
+  const wallet = ledgerWallet();
+  const walletKey = accountKey(wallet ? { type: 'wallet', id: wallet.id } : null);
+  const walletOptions = wallet && walletKey !== exclude
+    ? `<optgroup label="帳本帳戶"><option value="${escapeHtml(walletKey)}">帳本錢包</option></optgroup>`
+    : '';
+  const memberOptions = (state.data?.members || [])
+    .map((member) => ({ member, key: accountKey({ type: 'member', id: member.id }) }))
+    .filter(({ key }) => key !== exclude)
+    .map(({ member, key }) => `<option value="${escapeHtml(key)}">${escapeHtml(member.name)}</option>`)
+    .join('');
+  return `${walletOptions}${memberOptions ? `<optgroup label="成員">${memberOptions}</optgroup>` : ''}`;
+}
+
+function setAccountOptions(select, optionsHtml, { selected = '', placeholder = '' } = {}) {
+  const placeholderOption = placeholder
+    ? `<option value="" disabled selected>${escapeHtml(placeholder)}</option>`
+    : '';
+  select.innerHTML = `${placeholderOption}${optionsHtml}`;
+  const hasSelection = !!selected
+    && [...select.options].some((option) => option.value === selected);
+  if (hasSelection) select.value = selected;
+  else if (placeholder) select.value = '';
+  return hasSelection;
+}
+
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-const isTransfer = (e) => TRANSFER_CATS.includes(e.category);
-const isIncome = (e) => e.kind === 'income' && !isTransfer(e);
-const isSpend = (e) => !isIncome(e) && !isTransfer(e);
+const isTransfer = (e) => e.kind === 'transfer';
+const isIncome = (e) => e.kind === 'income';
+const isSpend = (e) => e.kind === 'expense';
 
 function addDays(iso, n) {
   const [y, m, d] = iso.split('-').map(Number);
@@ -293,17 +374,20 @@ async function refresh({ poll = false } = {}) {
 /* ===== 渲染 ===== */
 function renderAll() {
   const { group, members, expenses, balances, settlements, total } = state.data;
+  const wallet = ledgerWallet();
 
   $('#group-name').textContent = group.name;
   const exampleMembers = members
     .filter((member) => member.id !== state.memberId)
     .slice(0, 2)
     .map((member) => member.name);
-  $('#smart-input').placeholder = exampleMembers.length
-    ? `例如：昨天晚餐 1,280，我付，我跟${exampleMembers.join('、')}均分`
+  $('#smart-input').placeholder = wallet?.balance > 0 && exampleMembers.length
+    ? `例如：晚餐 1,280，帳本錢包付，我跟${exampleMembers[0]}均分`
+    : exampleMembers.length
+      ? `例如：昨天晚餐 1,280，我付，我跟${exampleMembers.join('、')}均分`
     : '例如：昨天晚餐 320，我付，不分攤';
   document.title = `${group.name} — 分帳小工具`;
-  const transferAvailable = hasTransferRecipient(members);
+  const transferAvailable = hasTransferRecipient(members, wallet);
   $('#kind-transfer').classList.toggle('hidden', !transferAvailable);
   $('#kind-transfer').disabled = !transferAvailable;
   if (transferAvailable && !$('#smart-add-member').classList.contains('hidden')) {
@@ -321,7 +405,7 @@ function renderAll() {
 
   renderFilterChips();
   renderExpenses();
-  renderBalances(members, balances);
+  renderBalances(members, balances, wallet);
   renderSettlements(settlements);
   renderStats();
   renderSmartRecents(expenses);
@@ -336,12 +420,16 @@ function matchesFilter(e) {
   if (state.filterCat !== '全部' && e.category !== state.filterCat) return false;
   const q = state.filterText.trim().toLowerCase();
   if (!q) return true;
+  const source = expenseSource(e);
+  const target = expenseTarget(e);
   const haystack = [
     e.description,
     e.note || '',
     e.category,
     isTransfer(e) ? '轉帳 還款' : isIncome(e) ? '收入 收款' : '支出 付款',
-    memberName(e.payer_id),
+    source ? accountName(source) : '',
+    source?.type === 'wallet' ? '公帳 公帳錢包 錢包' : '',
+    target ? accountName(target) : '',
     ...e.splits.map((s) => memberName(s.member_id)),
   ].join(' ').toLowerCase();
   return haystack.includes(q);
@@ -349,9 +437,23 @@ function matchesFilter(e) {
 
 function expenseItemHtml(e) {
   const names = escapeHtml(e.splits.map((s) => memberName(s.member_id)).join('、'));
-  const meta = isTransfer(e)
-    ? `${escapeHtml(memberName(e.payer_id))} ${e.category === '還款' ? '還款' : '匯款'}給 ${names}`
-    : `${escapeHtml(memberName(e.payer_id))} ${isIncome(e) ? '收款' : '付款'}｜分攤：${names}`;
+  const source = expenseSource(e);
+  const target = expenseTarget(e);
+  let meta;
+  if (isTransfer(e)) {
+    if (source?.type === 'member' && target?.type === 'wallet') {
+      meta = `${escapeHtml(accountName(source))} 存入帳本錢包`;
+    } else if (source?.type === 'wallet' && target?.type === 'member') {
+      meta = `帳本錢包支付 ${escapeHtml(accountName(target))}`;
+    } else {
+      meta = `${escapeHtml(accountName(source))} 轉給 ${escapeHtml(accountName(target))}`;
+    }
+  } else {
+    const flow = source?.type === 'wallet'
+      ? (isIncome(e) ? '收入存入帳本錢包' : '帳本錢包付款')
+      : `${escapeHtml(accountName(source))} ${isIncome(e) ? '收款' : '付款'}`;
+    meta = `${flow}｜${isIncome(e) ? '分配' : '分攤'}：${names}`;
+  }
   const kindCls = isIncome(e) ? ' income' : isTransfer(e) ? ' transfer' : '';
   const description = escapeHtml(e.description);
   const amount = escapeHtml(`${isIncome(e) ? '+' : ''}${fmt(e.amount)}`);
@@ -455,7 +557,30 @@ $('#expense-list').addEventListener('click', async (ev) => {
 });
 
 /* ===== 結算 ===== */
-function renderBalances(members, balances) {
+function renderBalances(members, balances, wallet) {
+  const walletCard = $('#wallet-balance-card');
+  walletCard.classList.toggle('hidden', !wallet);
+  if (wallet) {
+    const balance = Number(wallet.balance) || 0;
+    const balanceClass = balance > 0.005 ? 'positive' : balance < -0.005 ? 'negative' : 'zero';
+    const positionRows = members.flatMap((member) => {
+      const position = Number(wallet.positions?.[member.id]) || 0;
+      if (Math.abs(position) <= 0.005) return [];
+      const label = position > 0 ? '尚餘' : '待補';
+      const positionClass = position > 0 ? 'positive' : 'negative';
+      return [`
+        <li>
+          <span class="member-name-row">${escapeHtml(member.name)}</span>
+          <span class="balance-amount ${positionClass}">${label} ${fmt(Math.abs(position))}</span>
+        </li>`];
+    }).join('');
+    $('#wallet-balance-list').innerHTML = `
+      <li>
+        <span class="member-name-row">${balance < -0.005 ? '錢包缺口' : '可用餘額'}</span>
+        <span class="balance-amount ${balanceClass}">${fmt(Math.abs(balance))}</span>
+      </li>${positionRows}`;
+  }
+
   $('#balance-list').innerHTML = members.map((m) => {
     const bal = balances[m.id] ?? 0;
     const cls = bal > 0.005 ? 'positive' : bal < -0.005 ? 'negative' : 'zero';
@@ -470,18 +595,23 @@ function renderBalances(members, balances) {
 
 function renderSettlements(settlements) {
   $('#settle-empty').classList.toggle('hidden', settlements.length > 0);
-  $('#settlement-list').innerHTML = settlements.map((s, index) => `
-    <li data-index="${index}">
-      <div class="settle-main">
-        <span class="settle-party">${escapeHtml(memberName(s.from))}</span>
-        <span class="settle-arrow">→</span>
-        <span class="settle-party">${escapeHtml(memberName(s.to))}</span>
-        <span class="settle-amount">${fmt(s.amount)}</span>
-      </div>
-      <button type="button" class="settle-done" data-index="${index}">
-        ${ICONS.transfer}<span>記錄轉帳</span>
-      </button>
-    </li>`).join('');
+  $('#settlement-list').innerHTML = settlements.map((s, index) => {
+    const source = normalizeAccount(s.from);
+    const target = normalizeAccount(s.to);
+    const action = s.kind === 'wallet_top_up' ? '補入錢包' : '記錄轉帳';
+    return `
+      <li data-index="${index}">
+        <div class="settle-main">
+          <span class="settle-party">${escapeHtml(accountName(source))}</span>
+          <span class="settle-arrow">→</span>
+          <span class="settle-party">${escapeHtml(accountName(target))}</span>
+          <span class="settle-amount">${fmt(s.amount)}</span>
+        </div>
+        <button type="button" class="settle-done" data-index="${index}">
+          ${ICONS.transfer}<span>${action}</span>
+        </button>
+      </li>`;
+  }).join('');
 }
 
 $('#settlement-list').addEventListener('click', (ev) => {
@@ -490,11 +620,11 @@ $('#settlement-list').addEventListener('click', (ev) => {
   const settlement = state.data?.settlements[Number(button.dataset.index)];
   if (!settlement) return;
   openExpenseModal();
-  $('#exp-payer').value = settlement.from;
+  $('#exp-payer').value = accountKey(settlement.from);
   setKind('transfer');
   renderTransferTargets(settlement.to);
   $('#exp-amount').value = settlement.amount;
-  $('#exp-desc').value = '結算轉帳';
+  $('#exp-desc').value = settlement.kind === 'wallet_top_up' ? '補入帳本錢包' : '結算轉帳';
   expenseFormBaseline = expenseDraftSignature();
 });
 
@@ -581,27 +711,27 @@ function renderStats() {
       </li>`;
   }).join('');
 
-  // 成員統計：付了多少、應分攤多少
+  // 成員統計只呈現真人成員；錢包付款仍會反映在各自的分攤額。
   const { members } = state.data;
   const paid = {}, share = {};
   for (const e of filtered) {
-    paid[e.payer_id] = (paid[e.payer_id] || 0) + e.amount;
+    const source = expenseSource(e);
+    if (source?.type === 'member') paid[source.id] = (paid[source.id] || 0) + e.amount;
     for (const s of e.splits) share[s.member_id] = (share[s.member_id] || 0) + s.amount;
   }
-  const statMembers = members;
-  const maxPaid = Math.max(...statMembers.map((m) => paid[m.id] || 0), 1);
-  $('#member-stats').innerHTML = statMembers.map((m) => {
+  const maxShare = Math.max(...members.map((m) => share[m.id] || 0), 1);
+  $('#member-stats').innerHTML = members.map((m) => {
     const p = paid[m.id] || 0;
     const sh = share[m.id] || 0;
-    const pct = Math.round((p / maxPaid) * 100);
+    const pct = Math.round((sh / maxShare) * 100);
     return `
       <li>
         <div class="bar-row">
           <span class="bar-name">${escapeHtml(m.name)}</span>
-          <span class="bar-val">${fmt(p)}</span>
+          <span class="bar-val">${fmt(sh)}</span>
         </div>
         <div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div>
-        <div class="bar-sub">付款 ${fmt(p)}｜應分攤 ${fmt(sh)}</div>
+        <div class="bar-sub">分攤 ${fmt(sh)}｜個人付款 ${fmt(p)}</div>
       </li>`;
   }).join('');
 }
@@ -879,7 +1009,7 @@ function smartProgressMessage(stage = 0) {
     : hasReceipt ? '正在讀取單據' : '正在理解分帳內容';
   let detail = hasReceipt && !hasText
     ? '辨識店家、日期與金額'
-    : '整理金額、付款人與分帳對象';
+    : '整理金額、款項來源與分帳對象';
   if (selectedCount) {
     detail = hasReceipt && !hasText
       ? `辨識帳目並套用已選的 ${selectedCount} 位成員`
@@ -889,7 +1019,7 @@ function smartProgressMessage(stage = 0) {
     title = hasReceipt ? '正在核對單據細節' : '正在整理帳目草稿';
     detail = hasReceipt
       ? '確認金額、日期與分帳資訊'
-      : '確認付款人、分類與分帳方式';
+      : '確認款項來源、分類與分帳方式';
   } else if (stage >= 2) {
     title = hasReceipt ? '單據內容較多，仍在辨識' : '正在完成帳目草稿';
     detail = '完成後會開啟草稿供你確認';
@@ -1238,8 +1368,10 @@ function setupSmartSpeechInput() {
 
 function buildRepeatDraft(expense) {
   const splits = expense.splits || [];
+  const source = expenseSource(expense);
   const selfOnly = splits.length === 1
-    && splits[0].member_id === expense.payer_id
+    && source?.type === 'member'
+    && splits[0].member_id === source.id
     && Math.abs(splits[0].amount - expense.amount) < 0.011;
   const shares = equalSplit(expense.amount, splits.length);
   const equal = splits.length > 0
@@ -1253,8 +1385,7 @@ function buildRepeatDraft(expense) {
     amount: expense.amount,
     category: expense.category,
     expenseDate: todayLocal(),
-    payerId: expense.payer_id,
-    payerName: memberName(expense.payer_id),
+    source,
     participantIds: splits.map((split) => split.member_id),
     participantNames: splits.map((split) => memberName(split.member_id)),
     splitMode,
@@ -1265,8 +1396,7 @@ function buildRepeatDraft(expense) {
         amount: split.amount,
       }))
       : [],
-    transferToId: null,
-    transferToName: null,
+    target: null,
     note: null,
     confidence: 1,
     warnings: [],
@@ -1335,14 +1465,14 @@ function syncAiReviewSummary() {
   const summary = $('#ai-review-summary');
   if (!aiDraftActive || !summary) return;
   const payerLabel = expenseKind === 'transfer'
-    ? '匯款'
-    : expenseKind === 'income' ? '收款' : '付款';
+    ? '轉出來源'
+    : expenseKind === 'income' ? '收款去向' : '付款來源';
   const items = [{
     text: `${payerLabel}：${selectedOptionText('#exp-payer')}`,
     target: 'payer',
   }];
   if (expenseKind === 'transfer') {
-    items.push({ text: `匯給：${selectedOptionText('#exp-transfer-to')}`, target: 'transfer' });
+    items.push({ text: `轉入對象：${selectedOptionText('#exp-transfer-to')}`, target: 'transfer' });
   } else if (splitMode === 'none') {
     items.push({ text: '分帳：不分攤', target: 'split' });
   } else {
@@ -1429,20 +1559,35 @@ function showAiReview(result) {
 function aiDraftFocusTarget(draft) {
   if (!draft.description) return $('#exp-desc');
   if (!draft.amount) return $('#exp-amount');
-  if (draft.kind === 'transfer' && !draft.transferToId) return $('#exp-transfer-to');
+  if (!normalizeAccount(draft.source)) return $('#exp-payer');
+  if (draft.kind === 'transfer' && !normalizeAccount(draft.target)) return $('#exp-transfer-to');
   const warnings = (draft.warnings || []).join(' ');
   if (/信心較低/.test(warnings)) return $('#exp-desc');
   if (/日期/.test(warnings)) return $('#exp-date');
   if (/(分攤|成員)/.test(warnings) && draft.kind !== 'transfer') return $('#split-equal');
-  if (/(付款|收款)人/.test(warnings)) return $('#exp-payer');
+  if (/(付款|收款)(人|來源|去向)|款項來源/.test(warnings)) return $('#exp-payer');
   if (/分類/.test(warnings)) return $('#exp-categories .chip') || $('#exp-desc');
   return $('#ai-review-title');
 }
 
 function applyAiDraft(result) {
-  const { draft } = result;
-  if (aiDraftNeedsTransferMember(draft, state.data?.members)) {
-    setSmartFeedback('辨識為轉帳，但帳本目前沒有其他收款成員。', true, {
+  let { draft } = result;
+  const draftSource = normalizeAccount(draft.source);
+  if (draft.kind !== 'transfer' && draftSource?.type === 'wallet'
+    && !(draft.participantIds || []).length) {
+    const warning = draft.kind === 'income'
+      ? '帳本錢包收款需要選擇分配成員'
+      : '帳本錢包付款需要選擇分攤成員';
+    draft = {
+      ...draft,
+      ready: false,
+      splitMode: 'equal',
+      warnings: [...new Set([...(draft.warnings || []), warning])],
+    };
+    result = { ...result, draft };
+  }
+  if (aiDraftNeedsTransferMember(draft, state.data?.members, ledgerWallet())) {
+    setSmartFeedback('辨識為轉帳，但帳本目前沒有可用的轉入對象。', true, {
       showAddMember: true,
     });
     return false;
@@ -1458,14 +1603,15 @@ function applyAiDraft(result) {
   $('#exp-amount').value = draft.amount ?? '';
   $('#exp-date').value = draft.expenseDate || todayLocal();
   $('#exp-note').value = draft.note || '';
-  if (draft.payerId
-    && [...$('#exp-payer').options].some((option) => option.value === draft.payerId)) {
-    $('#exp-payer').value = draft.payerId;
-  }
+  const sourceKey = accountKey(draft.source);
+  setAccountOptions($('#exp-payer'), accountOptionsHtml(), {
+    selected: sourceKey,
+    placeholder: '請選擇款項來源',
+  });
 
   if (draft.kind === 'transfer') {
     setKind('transfer');
-    renderTransferTargets(draft.transferToId);
+    renderTransferTargets(draft.target, { requireSelection: true });
   } else {
     renderModalCats(draft.category);
     setKind(draft.kind === 'income' ? 'income' : 'expense');
@@ -1777,18 +1923,31 @@ function setExpenseSubmitting(submitting, pendingLabel = '儲存中…') {
   button.textContent = submitting ? pendingLabel : expenseSubmitLabel;
   button.disabled = submitting || !!receiptTask;
   $('.modal-card').setAttribute('aria-busy', String(submitting));
+  if (!submitting) syncWalletSplitConstraint();
 }
 
-function hasTransferRecipient(members = []) {
-  return members.length > 1;
+function hasTransferRecipient(members = [], wallet = null) {
+  return members.length + (wallet ? 1 : 0) > 1;
 }
 
-function aiDraftNeedsTransferMember(draft, members = []) {
-  return draft?.kind === 'transfer' && !hasTransferRecipient(members);
+function aiDraftNeedsTransferMember(draft, members = [], wallet = null) {
+  return draft?.kind === 'transfer' && !hasTransferRecipient(members, wallet);
+}
+
+function selectedSourceAccount() {
+  return accountFromKey($('#exp-payer').value);
+}
+
+function syncWalletSplitConstraint() {
+  const disallowNone = expenseKind !== 'transfer' && selectedSourceAccount()?.type === 'wallet';
+  const none = $('#split-none');
+  none.classList.toggle('hidden', disallowNone);
+  none.disabled = disallowNone;
+  if (disallowNone && splitMode === 'none') setSplitMode('equal');
 }
 
 function setKind(kind) {
-  if (kind === 'transfer' && !hasTransferRecipient(state.data?.members)) kind = 'expense';
+  if (kind === 'transfer' && !hasTransferRecipient(state.data?.members, ledgerWallet())) kind = 'expense';
   expenseKind = kind;
   const isTr = kind === 'transfer';
   $('#kind-expense').classList.toggle('active', kind === 'expense');
@@ -1798,7 +1957,7 @@ function setKind(kind) {
   $('#kind-income').setAttribute('aria-pressed', String(kind === 'income'));
   $('#kind-transfer').setAttribute('aria-pressed', String(isTr));
   $('#label-payer').firstChild.textContent =
-    isTr ? '匯款人' : kind === 'income' ? '收款人' : '付款人';
+    isTr ? '轉出來源' : kind === 'income' ? '收款去向' : '付款來源';
   $('#modal-title').textContent = (aiDraftActive ? '確認' : state.editingId ? '編輯' : '新增') +
     (isTr ? '轉帳' : kind === 'income' ? '收入' : '支出');
 
@@ -1811,7 +1970,7 @@ function setKind(kind) {
   const description = $('#exp-desc');
   transferTarget.required = isTr;
   description.required = !isTr;
-  description.placeholder = isTr ? '選填，例如：訂房代墊、結算還款' : '例如：晚餐、車票';
+  description.placeholder = isTr ? '選填，例如：補入錢包、退回代墊款' : '例如：晚餐、車票';
   (isTr ? description : transferTarget).removeAttribute('aria-invalid');
   if (isTr) {
     $('#split-members').classList.add('hidden');
@@ -1821,6 +1980,7 @@ function setKind(kind) {
   } else {
     setSplitMode(splitMode); // 恢復分攤區塊的顯示狀態
   }
+  syncWalletSplitConstraint();
   syncAiReviewSummary();
 }
 
@@ -1828,26 +1988,33 @@ $('#kind-expense').addEventListener('click', () => setKind('expense'));
 $('#kind-income').addEventListener('click', () => setKind('income'));
 $('#kind-transfer').addEventListener('click', () => setKind('transfer'));
 
-// 收款對象為匯款人以外的其他成員。
-function renderTransferTargets(selected) {
+// typed account 選項讓錢包與成員共用原生選單，但維持清楚的語意分組。
+function renderTransferTargets(selected, {
+  requireSelection = $('#exp-transfer-to').dataset.requireSelection === 'true',
+} = {}) {
   const sel = $('#exp-transfer-to');
-  const prev = selected ?? sel.value;
-  const payerId = $('#exp-payer').value;
-  const targets = state.data.members
-    .filter((m) => m.id !== payerId);
-  sel.innerHTML = targets.map((m) =>
-    `<option value="${m.id}">${escapeHtml(m.name)}</option>`).join('');
-  if (targets.some((m) => m.id === prev)) sel.value = prev;
+  const hasRequestedSelection = selected !== undefined;
+  const requested = typeof selected === 'string' ? selected : accountKey(selected);
+  const prev = hasRequestedSelection ? requested : sel.value;
+  const sourceKey = $('#exp-payer').value;
+  sel.dataset.requireSelection = String(requireSelection);
+  setAccountOptions(sel, accountOptionsHtml({ exclude: sourceKey }), {
+    selected: prev,
+    placeholder: requireSelection ? '請選擇轉入對象' : '',
+  });
   syncAiReviewSummary();
 }
 
 $('#exp-payer').addEventListener('change', () => {
   if (expenseKind === 'transfer') renderTransferTargets();
+  syncWalletSplitConstraint();
+  updateSplitPreview();
   syncAiReviewSummary();
 });
 $('#exp-transfer-to').addEventListener('change', syncAiReviewSummary);
 
 function setSplitMode(mode) {
+  if (mode === 'none' && selectedSourceAccount()?.type === 'wallet') mode = 'equal';
   splitMode = mode;
   $('#split-equal').classList.toggle('active', mode === 'equal');
   $('#split-custom').classList.toggle('active', mode === 'custom');
@@ -1915,9 +2082,12 @@ function openExpenseModal(expense = null, { aiDraft = false, deferOpen = false }
     ? state.data.categories[0]?.name
     : expense.category);
 
-  $('#exp-payer').innerHTML = members.map((m) =>
-    `<option value="${m.id}">${escapeHtml(m.name)}</option>`).join('');
-  $('#exp-payer').value = expense?.payer_id || state.memberId;
+  const payerSelect = $('#exp-payer');
+  payerSelect.required = true;
+  payerSelect.dataset.validationLabel = '款項來源';
+  $('#exp-transfer-to').dataset.requireSelection = 'false';
+  const sourceKey = accountKey(expense ? expenseSource(expense) : { type: 'member', id: state.memberId });
+  setAccountOptions(payerSelect, accountOptionsHtml(), { selected: sourceKey });
 
   const splitMembers = members;
   const splitMap = new Map((expense?.splits || []).map((s) => [s.member_id, s.amount]));
@@ -1948,8 +2118,10 @@ function openExpenseModal(expense = null, { aiDraft = false, deferOpen = false }
   // 編輯時判斷原本是不分攤、均分還是自訂
   let mode = 'equal';
   if (expense && !editingTransfer) {
+    const source = expenseSource(expense);
     const isSelfOnly = expense.splits.length === 1
-      && expense.splits[0].member_id === expense.payer_id
+      && source?.type === 'member'
+      && expense.splits[0].member_id === source.id
       && Math.abs(expense.splits[0].amount - expense.amount) < 0.011;
     if (isSelfOnly) {
       mode = 'none';
@@ -1964,7 +2136,7 @@ function openExpenseModal(expense = null, { aiDraft = false, deferOpen = false }
 
   // kind 要等付款人與分攤名單就緒後再設（轉帳模式會依付款人組出收款對象）
   setKind(editingTransfer ? 'transfer' : expense?.kind === 'income' ? 'income' : 'expense');
-  if (editingTransfer) renderTransferTargets(expense.splits[0]?.member_id);
+  if (editingTransfer) renderTransferTargets(expenseTarget(expense));
 
   // 單據與刪除鈕
   receiptState = { pending: null, existing: expense?.receipt || null, removed: false };
@@ -2215,8 +2387,8 @@ function updateSplitPreview() {
   if (splitMode === 'none') {
     el.classList.remove('hidden');
     el.textContent = expenseKind === 'income'
-      ? '這筆屬於收款人自己，不會影響任何人的結餘'
-      : '這筆由付款人自行承擔，不會影響任何人的結餘';
+      ? '這筆歸收款成員，不會影響其他人的結餘'
+      : '這筆由付款成員自行承擔，不會影響其他人的結餘';
     syncAiReviewSummary();
     return;
   }
@@ -2326,22 +2498,27 @@ $('#form-expense').addEventListener('submit', async (ev) => {
   if (receiptTask) return toast('單據仍在處理，完成後即可儲存');
   if (!AppForm.validate(ev.currentTarget, { notify: toast })) return;
   const amount = Number($('#exp-amount').value);
+  const source = selectedSourceAccount();
+  if (!source) return toast('請選擇款項來源');
   let payload;
 
   if (expenseKind === 'transfer') {
-    const to = $('#exp-transfer-to').value;
-    if (!to) return toast('請選擇收款對象');
-    const toMember = state.data.members.find((m) => m.id === to);
+    const target = accountFromKey($('#exp-transfer-to').value);
+    if (!target) return toast('請選擇轉入對象');
+    const transferDescription = source.type === 'member' && target.type === 'wallet'
+      ? '存入帳本錢包'
+      : source.type === 'wallet' && target.type === 'member'
+        ? `帳本錢包支付 ${accountName(target)}`
+        : `轉帳給 ${accountName(target)}`;
     payload = {
-      payerId: $('#exp-payer').value,
-      description: $('#exp-desc').value.trim()
-        || `匯款給 ${toMember?.name ?? '?'}`,
+      source: accountPayload(source),
+      target: accountPayload(target),
+      description: $('#exp-desc').value.trim() || transferDescription,
       amount,
-      kind: 'expense',
+      kind: 'transfer',
       category: transferCat,
       expenseDate: $('#exp-date').value,
       note: $('#exp-note').value,
-      splits: [{ memberId: to, amount }],
     };
   } else {
     const rows = [...$('#split-members').children];
@@ -2354,8 +2531,11 @@ $('#form-expense').addEventListener('submit', async (ev) => {
 
     let splits;
     if (splitMode === 'none') {
-      // 不分攤：整筆由付款人自行承擔，不影響任何人的結餘
-      splits = [{ memberId: $('#exp-payer').value, amount }];
+      if (source.type !== 'member') {
+        showSplitFormError('帳本錢包付款必須分攤給實際成員', $('#split-equal'));
+        return;
+      }
+      splits = [{ memberId: source.id, amount }];
     } else if (splitMode === 'equal') {
       const shares = equalSplit(amount, checkedRows.length);
       splits = checkedRows.map((r, i) => ({ memberId: r.dataset.id, amount: shares[i] }));
@@ -2381,7 +2561,7 @@ $('#form-expense').addEventListener('submit', async (ev) => {
     }
 
     payload = {
-      payerId: $('#exp-payer').value,
+      source: accountPayload(source),
       description: $('#exp-desc').value,
       amount,
       kind: expenseKind,

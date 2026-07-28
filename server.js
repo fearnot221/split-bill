@@ -21,6 +21,20 @@ const positiveIntegerEnv = (value, fallback) => {
   const parsed = Number(value);
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
 };
+const optionalHttpUrlEnv = (value, name) => {
+  const input = typeof value === 'string' ? value.trim() : '';
+  if (!input) return '';
+  if (input.length > 2048) throw new Error(`${name} is too long`);
+  let parsed;
+  try { parsed = new URL(input); } catch { throw new Error(`${name} must be a valid HTTP(S) URL`); }
+  if (!['http:', 'https:'].includes(parsed.protocol)) {
+    throw new Error(`${name} must use HTTP or HTTPS`);
+  }
+  if (parsed.username || parsed.password || parsed.hash) {
+    throw new Error(`${name} cannot contain credentials or a fragment`);
+  }
+  return input;
+};
 const readOpenAiApiKeyFile = (filename) => {
   if (!filename) return '';
   const resolved = path.resolve(filename);
@@ -44,6 +58,7 @@ const APP_PASSWORD = process.env.APP_PASSWORD || '';
 const ALLOW_PUBLIC_ACCESS = process.env.ALLOW_PUBLIC_ACCESS === '1';
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY
   || readOpenAiApiKeyFile(process.env.OPENAI_API_KEY_FILE);
+const OPENAI_BASE_URL = optionalHttpUrlEnv(process.env.OPENAI_BASE_URL, 'OPENAI_BASE_URL');
 const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-5.6-sol';
 const OPENAI_TIMEOUT_MS = positiveIntegerEnv(process.env.OPENAI_TIMEOUT_MS, 30_000);
 const AI_REQUESTS_PER_HOUR = positiveIntegerEnv(process.env.AI_REQUESTS_PER_HOUR, 30);
@@ -68,7 +83,12 @@ if (process.env.NODE_ENV === 'production' && !APP_PASSWORD && !ALLOW_PUBLIC_ACCE
 
 const db = require('./db');
 const openai = OPENAI_API_KEY
-  ? new OpenAI({ apiKey: OPENAI_API_KEY, timeout: OPENAI_TIMEOUT_MS, maxRetries: 0 })
+  ? new OpenAI({
+    apiKey: OPENAI_API_KEY,
+    baseURL: OPENAI_BASE_URL || undefined,
+    timeout: OPENAI_TIMEOUT_MS,
+    maxRetries: 0,
+  })
   : null;
 
 if (process.env.TRUST_PROXY === '1') app.set('trust proxy', 1);
@@ -225,6 +245,34 @@ function genCode() {
 
 // 「還款」「轉帳」是成員間資金移動，不算實際消費
 const TRANSFER_CATEGORIES = ['還款', '轉帳'];
+const memberAccountRef = (id) => ({ type: 'member', id });
+const walletAccountRef = (id) => ({ type: 'wallet', id });
+
+function entryAccountRefs(expense) {
+  const source = expense.payer_wallet_id !== null && expense.payer_wallet_id !== undefined
+    ? walletAccountRef(expense.payer_wallet_id)
+    : memberAccountRef(expense.payer_id);
+  if (expense.kind !== 'transfer') {
+    return { source, target: null };
+  }
+  const target = expense.transfer_to_wallet_id !== null
+    && expense.transfer_to_wallet_id !== undefined
+    ? walletAccountRef(expense.transfer_to_wallet_id)
+    : memberAccountRef(expense.transfer_to_member_id);
+  return { source, target };
+}
+
+function withStructuredDraftAccounts(draft) {
+  const source = draft?.payerSource === 'wallet'
+    ? draft.payerWalletId ? walletAccountRef(draft.payerWalletId) : null
+    : draft?.payerId ? memberAccountRef(draft.payerId) : null;
+  const target = draft?.kind !== 'transfer'
+    ? null
+    : draft.transferToSource === 'wallet'
+      ? draft.transferToWalletId ? walletAccountRef(draft.transferToWalletId) : null
+      : draft.transferToId ? memberAccountRef(draft.transferToId) : null;
+  return { ...draft, source, target };
+}
 
 // 取得群組完整資料（成員、支出、結餘、結算建議）
 function getGroupData(groupId) {
@@ -234,6 +282,8 @@ function getGroupData(groupId) {
   const members = db
     .prepare('SELECT * FROM members WHERE group_id = ? ORDER BY created_at')
     .all(groupId);
+  const wallet = db.prepare('SELECT * FROM ledger_wallets WHERE group_id = ?').get(groupId);
+  if (!wallet) throw new Error(`帳本 ${groupId} 缺少公帳錢包`);
 
   const expenses = db
     .prepare(`SELECT * FROM expenses WHERE group_id = ? AND deleted_at IS NULL
@@ -254,17 +304,40 @@ function getGroupData(groupId) {
   for (const expense of expenses) {
     delete expense.request_key;
     expense.splits = splitsByExpense.get(expense.id) || [];
+    const accounts = entryAccountRefs(expense);
+    expense.source = accounts.source;
+    expense.target = accounts.target;
   }
 
-  const ledger = calculateLedger(members, expenses);
+  const ledger = calculateLedger(members, expenses, [wallet]);
   const balances = Object.fromEntries(
     Object.entries(ledger.balancesCents).map(([id, cents]) => [id, centsToMoney(cents)])
   );
   const settlements = calculateSettlements(ledger.balancesCents).map((settlement) => ({
-    from: settlement.from,
-    to: settlement.to,
+    kind: 'member_transfer',
+    from: { type: 'member', id: settlement.from },
+    to: { type: 'member', id: settlement.to },
     amount: centsToMoney(settlement.amountCents),
   }));
+  const walletLedger = ledger.walletLedgers[wallet.id];
+  const positions = Object.fromEntries(
+    Object.entries(walletLedger.positionsCents).map(([id, cents]) => [id, centsToMoney(cents)])
+  );
+  for (const [memberId, cents] of Object.entries(walletLedger.positionsCents)) {
+    if (cents >= 0) continue;
+    settlements.push({
+      kind: 'wallet_top_up',
+      from: { type: 'member', id: memberId },
+      to: { type: 'wallet', id: wallet.id },
+      amount: centsToMoney(-cents),
+    });
+  }
+  const walletData = {
+    id: wallet.id,
+    name: wallet.name,
+    balance: centsToMoney(walletLedger.balanceCents),
+    positions,
+  };
   const total = centsToMoney(ledger.totalExpenseCents);
   const totalIncome = centsToMoney(ledger.totalIncomeCents);
 
@@ -272,7 +345,9 @@ function getGroupData(groupId) {
     .prepare('SELECT id, name, icon FROM categories WHERE group_id = ? ORDER BY sort, rowid')
     .all(groupId);
 
-  return { group, members, expenses, balances, settlements, total, totalIncome, categories };
+  return {
+    group, wallet: walletData, members, expenses, balances, settlements, total, totalIncome, categories,
+  };
 }
 
 // 支出的類別必須存在（還款／轉帳為系統保留類別）
@@ -282,6 +357,7 @@ function isValidCategory(groupId, name) {
 }
 
 const trimmedString = (value) => typeof value === 'string' ? value.trim() : '';
+const isReservedMemberName = (name) => ['公帳', '錢包', '公帳錢包', '帳本錢包'].includes(name);
 
 function isValidDate(value) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
@@ -296,19 +372,18 @@ function validateExpenseInput(groupId, body) {
 
   const description = trimmedString(body.description);
   const note = trimmedString(body.note);
-  const payerId = typeof body.payerId === 'string' ? body.payerId : '';
   const category = body.category === undefined || body.category === null || body.category === ''
     ? '其他'
     : trimmedString(body.category);
-  const kind = body.kind === undefined || body.kind === null || body.kind === ''
+  const requestedKind = body.kind === undefined || body.kind === null || body.kind === ''
     ? 'expense'
-    : body.kind === 'income' ? 'income' : body.kind === 'expense' ? 'expense' : null;
+    : ['expense', 'income', 'transfer'].includes(body.kind) ? body.kind : null;
   const expenseDate = body.expenseDate || new Date().toISOString().slice(0, 10);
 
   if (!description) return { error: '請填寫項目說明' };
   if (description.length > 50) return { error: '項目說明最多 50 字' };
   if (note.length > 500) return { error: '備註最多 500 字' };
-  if (!kind) return { error: '紀錄類型不正確' };
+  if (!requestedKind) return { error: '紀錄類型不正確' };
   if (!isValidDate(expenseDate)) return { error: '日期格式不正確' };
   if (!category) return { error: '類別不正確' };
 
@@ -321,14 +396,168 @@ function validateExpenseInput(groupId, body) {
   }
   if (amountCents <= 0) return { error: '金額必須大於 0' };
 
-  if (!Array.isArray(body.splits) || body.splits.length === 0) {
-    return { error: '請至少選擇一位分攤成員' };
-  }
-
   const memberIds = new Set(
     db.prepare('SELECT id FROM members WHERE group_id = ?').all(groupId).map((member) => member.id)
   );
-  if (!memberIds.has(payerId)) return { error: '付款人不在群組中' };
+  const wallet = db.prepare('SELECT id FROM ledger_wallets WHERE group_id = ?').get(groupId);
+  if (!wallet) return { error: '帳本缺少公帳錢包' };
+  const sameAccount = (left, right) => left.type === right.type
+    && (left.memberId || left.walletId) === (right.memberId || right.walletId);
+  const parseAccount = (account, label) => {
+    if (!account || typeof account !== 'object' || Array.isArray(account)) {
+      return { error: `${label}格式不正確` };
+    }
+    if (account.type === 'member') {
+      if (account.walletId !== undefined) return { error: `${label}格式不正確` };
+      const memberId = typeof account.memberId === 'string'
+        ? account.memberId
+        : typeof account.id === 'string' ? account.id : '';
+      if (typeof account.memberId === 'string' && typeof account.id === 'string'
+        && account.memberId !== account.id) return { error: `${label}格式不正確` };
+      if (!memberIds.has(memberId)) return { error: `${label}成員不在帳本中` };
+      return { type: 'member', memberId };
+    }
+    if (account.type === 'wallet') {
+      if (account.memberId !== undefined) return { error: `${label}格式不正確` };
+      const walletId = typeof account.walletId === 'string'
+        ? account.walletId
+        : typeof account.id === 'string' ? account.id : '';
+      if (typeof account.walletId === 'string' && typeof account.id === 'string'
+        && account.walletId !== account.id) return { error: `${label}格式不正確` };
+      if (walletId !== wallet.id) return { error: `${label}公帳不在帳本中` };
+      return { type: 'wallet', walletId };
+    }
+    return { error: `${label}類型不正確` };
+  };
+  const parseLegacyAccountId = (value, label, expectedType = null) => {
+    if (typeof value !== 'string' || !value) return { error: `${label}格式不正確` };
+    if ((!expectedType || expectedType === 'member') && memberIds.has(value)) {
+      return { type: 'member', memberId: value };
+    }
+    // 舊版把公帳當 member；遷移沿用其 ID 作為 wallet ID，讓快取中的舊頁面仍可送出。
+    if ((!expectedType || expectedType === 'wallet') && value === wallet.id) {
+      return { type: 'wallet', walletId: value };
+    }
+    return { error: expectedType === 'wallet'
+      ? `${label}公帳不在帳本中`
+      : `${label}成員不在帳本中` };
+  };
+  const legacyPayerId = typeof body.payerId === 'string' ? body.payerId : '';
+  const legacyPayerWalletId = typeof body.payerWalletId === 'string'
+    ? body.payerWalletId
+    : '';
+  if (legacyPayerId && legacyPayerWalletId) {
+    return { error: '款項來源不能同時指定成員與公帳' };
+  }
+  const structuredSource = body.source === undefined
+    ? null
+    : parseAccount(body.source, '款項來源');
+  if (structuredSource?.error) return { error: structuredSource.error };
+  const legacySource = legacyPayerId
+    ? parseLegacyAccountId(legacyPayerId, '款項來源')
+    : legacyPayerWalletId
+      ? parseLegacyAccountId(legacyPayerWalletId, '款項來源', 'wallet')
+      : null;
+  if (legacySource?.error) return { error: legacySource.error };
+  if (structuredSource && legacySource && !sameAccount(structuredSource, legacySource)) {
+    return { error: 'structured 與舊版款項來源不一致' };
+  }
+  const source = structuredSource || legacySource;
+  if (!source) return { error: '款項來源格式不正確' };
+
+  const isTransfer = requestedKind === 'transfer' || TRANSFER_CATEGORIES.includes(category);
+  const normalizedKind = isTransfer ? 'transfer' : requestedKind;
+  const normalizedCategory = isTransfer
+    ? (TRANSFER_CATEGORIES.includes(category) ? category : '轉帳')
+    : category;
+  if (!isValidCategory(groupId, normalizedCategory)) return { error: '類別不存在' };
+
+  if (isTransfer) {
+    const targetCandidates = [];
+    if (body.target !== undefined) {
+      const structuredTarget = parseAccount(body.target, '轉入對象');
+      if (structuredTarget.error) return { error: structuredTarget.error };
+      targetCandidates.push(structuredTarget);
+    }
+    const flatTargetMemberId = typeof body.transferToMemberId === 'string'
+      ? body.transferToMemberId
+      : '';
+    const flatTargetWalletId = typeof body.transferToWalletId === 'string'
+      ? body.transferToWalletId
+      : '';
+    const legacyTargetId = typeof body.transferToId === 'string' ? body.transferToId : '';
+    if (Number(!!flatTargetMemberId) + Number(!!flatTargetWalletId) + Number(!!legacyTargetId) > 1) {
+      return { error: '轉入對象不能重複指定' };
+    }
+    if (flatTargetMemberId) {
+      const flatTarget = parseLegacyAccountId(flatTargetMemberId, '轉入對象', 'member');
+      if (flatTarget.error) return { error: flatTarget.error };
+      targetCandidates.push(flatTarget);
+    } else if (flatTargetWalletId) {
+      const flatTarget = parseLegacyAccountId(flatTargetWalletId, '轉入對象', 'wallet');
+      if (flatTarget.error) return { error: flatTarget.error };
+      targetCandidates.push(flatTarget);
+    } else if (legacyTargetId) {
+      const flatTarget = parseLegacyAccountId(legacyTargetId, '轉入對象');
+      if (flatTarget.error) return { error: flatTarget.error };
+      targetCandidates.push(flatTarget);
+    }
+
+    if (body.splits !== undefined && !Array.isArray(body.splits)) {
+      return { error: '轉帳分攤資料格式不正確' };
+    }
+    const legacySplits = body.splits || [];
+    if (legacySplits.length > 0) {
+      if (legacySplits.length !== 1 || !legacySplits[0]
+        || typeof legacySplits[0] !== 'object' || Array.isArray(legacySplits[0])) {
+        return { error: '轉帳需指定一位收款對象' };
+      }
+      let legacyAmountCents;
+      try { legacyAmountCents = moneyToCents(legacySplits[0]?.amount); } catch {
+        return { error: '轉帳金額格式不正確' };
+      }
+      if (legacyAmountCents !== amountCents) return { error: '轉帳金額與收款金額不符' };
+      const legacyTarget = parseLegacyAccountId(
+        legacySplits[0]?.memberId,
+        '轉入對象'
+      );
+      if (legacyTarget.error) return { error: legacyTarget.error };
+      targetCandidates.push(legacyTarget);
+    }
+    const target = targetCandidates[0];
+    if (!target) return { error: '轉入對象格式不正確' };
+    if (targetCandidates.some((candidate) => !sameAccount(candidate, target))) {
+      return { error: 'structured 與舊版轉入對象不一致' };
+    }
+    if (sameAccount(source, target)) return { error: '不能轉帳給同一個帳戶' };
+    if (source.type === 'wallet' && target.type === 'wallet') {
+      return { error: '不能在同一個公帳內轉帳' };
+    }
+    return {
+      value: {
+        payerId: source.type === 'member' ? source.memberId : null,
+        payerWalletId: source.type === 'wallet' ? source.walletId : null,
+        transferToMemberId: target.type === 'member' ? target.memberId : null,
+        transferToWalletId: target.type === 'wallet' ? target.walletId : null,
+        description,
+        amount: centsToMoney(amountCents),
+        category: normalizedCategory,
+        expenseDate,
+        note: note || null,
+        kind: normalizedKind,
+        splits: [],
+      },
+    };
+  }
+
+  if (body.target != null || body.transferToMemberId || body.transferToWalletId
+    || body.transferToId) {
+    return { error: '非轉帳紀錄不能指定轉入對象' };
+  }
+
+  if (!Array.isArray(body.splits) || body.splits.length === 0) {
+    return { error: '請至少選擇一位分攤成員' };
+  }
 
   const seen = new Set();
   const splits = [];
@@ -361,20 +590,15 @@ function validateExpenseInput(groupId, body) {
     };
   }
 
-  let normalizedKind = kind;
-  if (!isValidCategory(groupId, category)) return { error: '類別不存在' };
-  if (TRANSFER_CATEGORIES.includes(category)) {
-    normalizedKind = 'expense';
-    if (splits.length !== 1) return { error: '轉帳需指定一位收款對象' };
-    if (splits[0].memberId === payerId) return { error: '不能轉帳給自己' };
-  }
-
   return {
     value: {
-      payerId,
+      payerId: source.type === 'member' ? source.memberId : null,
+      payerWalletId: source.type === 'wallet' ? source.walletId : null,
+      transferToMemberId: null,
+      transferToWalletId: null,
       description,
       amount: centsToMoney(amountCents),
-      category,
+      category: normalizedCategory,
       expenseDate,
       note: note || null,
       kind: normalizedKind,
@@ -397,12 +621,15 @@ function getAiContext(groupId, preferredMemberId) {
   const members = db.prepare(
     'SELECT id, name FROM members WHERE group_id = ? ORDER BY created_at'
   ).all(groupId);
+  const wallet = db.prepare(
+    'SELECT id, name FROM ledger_wallets WHERE group_id = ?'
+  ).get(groupId);
   const categories = db.prepare(
     'SELECT name FROM categories WHERE group_id = ? ORDER BY sort, rowid'
   ).all(groupId);
   const preferred = members.find((member) => member.id === preferredMemberId);
   const defaultMember = preferred || members[0];
-  return { members, categories, defaultMemberId: defaultMember?.id || null };
+  return { members, wallet, categories, defaultMemberId: defaultMember?.id || null };
 }
 
 function validateExplicitParticipantIds(value, context) {
@@ -496,7 +723,9 @@ app.get('/api/ai/status', (req, res) => {
 
 function buildLocalAnalysis({ text, receiptDataUrl, context, today, notice }) {
   const raw = localParse(text, { ...context, today, hasReceipt: !!receiptDataUrl });
-  const draft = normalizeDraft(raw, { ...context, today, sourceText: text });
+  const draft = withStructuredDraftAccounts(
+    normalizeDraft(raw, { ...context, today, sourceText: text })
+  );
   const notices = [notice].filter(Boolean);
   if (receiptDataUrl) notices.push('這次未辨識單據內容，圖片仍會隨帳目保存');
   const participantNotice = explicitParticipantNotice(context, draft);
@@ -581,7 +810,8 @@ app.post('/api/groups/:id/ai/parse', async (req, res) => {
       provider: 'openai', model: OPENAI_MODEL, hasReceipt: !!receiptDataUrl,
       success: true, startedAt, usage: result.usage,
     });
-    const participantNotice = explicitParticipantNotice(context, result.draft);
+    const draft = withStructuredDraftAccounts(result.draft);
+    const participantNotice = explicitParticipantNotice(context, draft);
     const notices = [];
     if (participantNotice) notices.push(participantNotice);
     if (result.receiptDetailUpgradeFailed) {
@@ -592,7 +822,7 @@ app.post('/api/groups/:id/ai/parse', async (req, res) => {
     return res.json({
       provider: 'openai',
       model: OPENAI_MODEL,
-      draft: result.draft,
+      draft,
       notices,
     });
   } catch (error) {
@@ -635,6 +865,7 @@ app.get('/api/me', (req, res) => {
       db.prepare('INSERT INTO members (id, group_id, name) VALUES (?, ?, ?)')
         .run(memberId, groupId, '我');
       db.seedCategories(groupId);
+      db.seedWallet(groupId);
     })();
     group = db.prepare('SELECT * FROM groups WHERE id = ?').get(groupId);
   }
@@ -684,6 +915,7 @@ app.post('/api/groups/:id/members', requireAdmin, (req, res) => {
   const name = trimmedString(req.body?.name);
   if (!name) return res.status(400).json({ error: '請填寫成員名字' });
   if (name.length > 20) return res.status(400).json({ error: '成員名字最多 20 字' });
+  if (isReservedMemberName(name)) return res.status(400).json({ error: '此名稱保留給公帳錢包' });
   const group = db.prepare('SELECT id FROM groups WHERE id = ?').get(req.params.id);
   if (!group) return res.status(404).json({ error: '找不到群組' });
   const exists = db
@@ -708,8 +940,9 @@ app.delete('/api/groups/:id/members/:memberId', requireAdmin, (req, res) => {
   const involved = db
     .prepare(`SELECT 1 FROM expenses WHERE group_id = ? AND payer_id = ?
               UNION SELECT 1 FROM expense_splits s JOIN expenses e ON e.id = s.expense_id
-              WHERE e.group_id = ? AND s.member_id = ?`)
-    .get(id, memberId, id, memberId);
+              WHERE e.group_id = ? AND s.member_id = ?
+              UNION SELECT 1 FROM expenses WHERE group_id = ? AND transfer_to_member_id = ?`)
+    .get(id, memberId, id, memberId, id, memberId);
   if (involved) return res.status(409).json({ error: '此成員已有帳務紀錄，無法刪除' });
   db.prepare('DELETE FROM members WHERE id = ? AND group_id = ?').run(memberId, id);
   res.json({ ok: true });
@@ -799,12 +1032,15 @@ function createExpense(req, res, withReceipt = false) {
     db.transaction(() => {
       db.prepare(
         `INSERT INTO expenses (
-          id, group_id, payer_id, description, amount, category, expense_date, note, kind,
+          id, group_id, payer_id, payer_wallet_id, transfer_to_member_id,
+          transfer_to_wallet_id, description, amount, category, expense_date, note, kind,
           receipt, request_key
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
-        expenseId, groupId, expense.payerId, expense.description, expense.amount,
-        expense.category, expense.expenseDate, expense.note, expense.kind, receiptFilename, requestKey
+        expenseId, groupId, expense.payerId, expense.payerWalletId,
+        expense.transferToMemberId, expense.transferToWalletId, expense.description,
+        expense.amount, expense.category, expense.expenseDate, expense.note, expense.kind,
+        receiptFilename, requestKey
       );
       const ins = db.prepare(
         'INSERT INTO expense_splits (expense_id, member_id, amount) VALUES (?, ?, ?)'
@@ -880,10 +1116,12 @@ app.put('/api/groups/:id/expenses/:expenseId', (req, res) => {
   try {
     saved = db.transaction(() => {
       const result = db.prepare(
-        `UPDATE expenses SET payer_id = ?, description = ?, amount = ?, category = ?, expense_date = ?,
+        `UPDATE expenses SET payer_id = ?, payer_wallet_id = ?, transfer_to_member_id = ?,
+         transfer_to_wallet_id = ?, description = ?, amount = ?, category = ?, expense_date = ?,
          note = ?, kind = ?, receipt = ?, version = version + 1 WHERE id = ? AND version = ?`
       ).run(
-        expense.payerId, expense.description, expense.amount, expense.category,
+        expense.payerId, expense.payerWalletId, expense.transferToMemberId,
+        expense.transferToWalletId, expense.description, expense.amount, expense.category,
         expense.expenseDate, expense.note, expense.kind, nextReceipt, expenseId, existing.version
       );
       if (result.changes === 0) return false;
@@ -1129,8 +1367,10 @@ app.get('/api/admin/overview', requireAdmin, (req, res) => {
     SELECT m.*,
       (SELECT COUNT(*) FROM expenses e WHERE e.payer_id = m.id) AS paid_count,
       (SELECT COUNT(*) FROM expense_splits s JOIN expenses e ON e.id = s.expense_id
-        WHERE s.member_id = m.id) AS split_count
+        WHERE s.member_id = m.id) AS split_count,
+      (SELECT COUNT(*) FROM expenses e WHERE e.transfer_to_member_id = m.id) AS transfer_count
     FROM members m WHERE m.group_id = ? ORDER BY m.created_at`).all(group.id);
+  const wallet = db.prepare('SELECT id, name FROM ledger_wallets WHERE group_id = ?').get(group.id);
 
   const nameOf = new Map(members.map((m) => [m.id, m.name]));
   const deleted = db.prepare(`SELECT * FROM expenses WHERE group_id = ? AND deleted_at IS NOT NULL
@@ -1138,7 +1378,13 @@ app.get('/api/admin/overview', requireAdmin, (req, res) => {
   const splitStmt = db.prepare('SELECT member_id, amount FROM expense_splits WHERE expense_id = ?');
   for (const e of deleted) {
     delete e.request_key;
-    e.payer_name = nameOf.get(e.payer_id) || '?';
+    const accounts = entryAccountRefs(e);
+    e.source = accounts.source;
+    e.target = accounts.target;
+    e.payer_name = e.payer_wallet_id ? wallet?.name || '公帳' : nameOf.get(e.payer_id) || '?';
+    e.transfer_to_name = e.transfer_to_wallet_id
+      ? wallet?.name || '公帳'
+      : nameOf.get(e.transfer_to_member_id) || null;
     e.split_names = splitStmt.all(e.id).map((s) => nameOf.get(s.member_id) || '?');
   }
 
@@ -1171,7 +1417,7 @@ app.get('/api/admin/overview', requireAdmin, (req, res) => {
     errors: Object.fromEntries(usageErrors.map((row) => [row.error_code, row.count])),
   };
 
-  res.json({ group, members, deleted, categories, aiUsage });
+  res.json({ group, wallet, members, deleted, categories, aiUsage });
 });
 
 // 成員改名
@@ -1179,6 +1425,7 @@ app.post('/api/admin/members/:memberId/rename', requireAdmin, (req, res) => {
   const name = trimmedString(req.body?.name);
   if (!name) return res.status(400).json({ error: '請填寫名字' });
   if (name.length > 20) return res.status(400).json({ error: '成員名字最多 20 字' });
+  if (isReservedMemberName(name)) return res.status(400).json({ error: '此名稱保留給公帳錢包' });
   const member = db.prepare('SELECT * FROM members WHERE id = ?').get(req.params.memberId);
   if (!member) return res.status(404).json({ error: '找不到成員' });
   const dup = db.prepare('SELECT 1 FROM members WHERE group_id = ? AND name = ? AND id != ?')

@@ -1,6 +1,7 @@
 const Database = require('better-sqlite3');
+const crypto = require('crypto');
 const path = require('path');
-const { centsToMoney, moneyToCents } = require('./lib/ledger');
+const { calculateLedger, centsToMoney, moneyToCents } = require('./lib/ledger');
 
 const databasePath = process.env.DB_PATH
   ? path.resolve(process.env.DB_PATH)
@@ -26,10 +27,20 @@ CREATE TABLE IF NOT EXISTS members (
   UNIQUE (group_id, name)
 );
 
+CREATE TABLE IF NOT EXISTS ledger_wallets (
+  id TEXT PRIMARY KEY,
+  group_id TEXT NOT NULL UNIQUE REFERENCES groups(id) ON DELETE CASCADE,
+  name TEXT NOT NULL DEFAULT '公帳',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS expenses (
   id TEXT PRIMARY KEY,
   group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
-  payer_id TEXT NOT NULL REFERENCES members(id),
+  payer_id TEXT REFERENCES members(id),
+  payer_wallet_id TEXT REFERENCES ledger_wallets(id),
+  transfer_to_member_id TEXT REFERENCES members(id),
+  transfer_to_wallet_id TEXT REFERENCES ledger_wallets(id),
   description TEXT NOT NULL,
   amount REAL NOT NULL,
   category TEXT NOT NULL DEFAULT '其他',
@@ -38,9 +49,18 @@ CREATE TABLE IF NOT EXISTS expenses (
   deleted_at TEXT,
   receipt TEXT,
   note TEXT,
-  kind TEXT NOT NULL DEFAULT 'expense',
+  kind TEXT NOT NULL DEFAULT 'expense' CHECK (kind IN ('expense', 'income', 'transfer')),
   version INTEGER NOT NULL DEFAULT 1,
-  request_key TEXT
+  request_key TEXT,
+  CHECK ((payer_id IS NOT NULL) <> (payer_wallet_id IS NOT NULL)),
+  CHECK ((transfer_to_member_id IS NULL) OR (transfer_to_wallet_id IS NULL)),
+  CHECK (
+    (kind = 'transfer' AND ((transfer_to_member_id IS NOT NULL) <> (transfer_to_wallet_id IS NOT NULL)))
+    OR
+    (kind IN ('expense', 'income') AND transfer_to_member_id IS NULL AND transfer_to_wallet_id IS NULL)
+  ),
+  CHECK (payer_id IS NULL OR transfer_to_member_id IS NULL OR payer_id <> transfer_to_member_id),
+  CHECK (payer_wallet_id IS NULL OR transfer_to_wallet_id IS NULL OR payer_wallet_id <> transfer_to_wallet_id)
 );
 
 CREATE TABLE IF NOT EXISTS expense_splits (
@@ -90,8 +110,8 @@ CREATE TABLE IF NOT EXISTS ai_usage (
 CREATE INDEX IF NOT EXISTS idx_ai_usage_created ON ai_usage(created_at);
 `);
 
-// 既有資料庫補上軟刪除與單據欄位
-const expenseCols = db.prepare('PRAGMA table_info(expenses)').all();
+// 先補齊舊版欄位，再把付款來源與轉帳去向升級成 member / wallet 明確關聯。
+let expenseCols = db.prepare('PRAGMA table_info(expenses)').all();
 if (!expenseCols.some((c) => c.name === 'deleted_at')) {
   db.exec('ALTER TABLE expenses ADD COLUMN deleted_at TEXT');
 }
@@ -110,33 +130,308 @@ if (!expenseCols.some((c) => c.name === 'version')) {
 if (!expenseCols.some((c) => c.name === 'request_key')) {
   db.exec('ALTER TABLE expenses ADD COLUMN request_key TEXT');
 }
-db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_expenses_request_key
-  ON expenses(request_key) WHERE request_key IS NOT NULL`);
 const memberCols = db.prepare('PRAGMA table_info(members)').all();
-if (memberCols.some((c) => c.name === 'is_fund')) {
-  const removedFunds = db.transaction(() => {
-    const references = db.prepare(`SELECT
-      (SELECT COUNT(*) FROM expenses e
-        JOIN members m ON m.id = e.payer_id WHERE m.is_fund = 1) AS payer_refs,
-      (SELECT COUNT(*) FROM expense_splits s
-        JOIN members m ON m.id = s.member_id WHERE m.is_fund = 1) AS split_refs`).get();
-    const referenceCount = references.payer_refs + references.split_refs;
-    if (referenceCount > 0) {
-      throw new Error(
-        `無法移除舊公帳角色：仍有 ${referenceCount} 筆帳務關聯。`
-        + '請先使用舊版匯出或清理相關紀錄後再升級。'
-      );
+const hasLegacyFundRole = memberCols.some((column) => column.name === 'is_fund');
+expenseCols = db.prepare('PRAGMA table_info(expenses)').all();
+const payerColumn = expenseCols.find((column) => column.name === 'payer_id');
+const expenseTableSql = db.prepare(
+  "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'expenses'"
+).get()?.sql || '';
+const needsWalletMigration = hasLegacyFundRole
+  || !expenseCols.some((column) => column.name === 'payer_wallet_id')
+  || !expenseCols.some((column) => column.name === 'transfer_to_member_id')
+  || !expenseCols.some((column) => column.name === 'transfer_to_wallet_id')
+  || payerColumn?.notnull === 1
+  || !expenseTableSql.includes(
+    'CHECK ((payer_id IS NOT NULL) <> (payer_wallet_id IS NOT NULL))'
+  );
+
+function ensureWallet(groupId, preferred = null) {
+  const existing = db.prepare('SELECT * FROM ledger_wallets WHERE group_id = ?').get(groupId);
+  if (existing) return existing;
+  const wallet = {
+    id: preferred?.id || crypto.randomUUID(),
+    group_id: groupId,
+    name: preferred?.name || '公帳',
+  };
+  db.prepare('INSERT INTO ledger_wallets (id, group_id, name) VALUES (?, ?, ?)')
+    .run(wallet.id, wallet.group_id, wallet.name);
+  return wallet;
+}
+
+if (needsWalletMigration) {
+  const legacyFunds = hasLegacyFundRole
+    ? db.prepare(`SELECT id, group_id, name FROM members WHERE is_fund = 1
+      ORDER BY created_at, rowid`).all()
+    : [];
+  const duplicateFund = hasLegacyFundRole
+    ? db.prepare(`SELECT group_id FROM members WHERE is_fund = 1
+      GROUP BY group_id HAVING COUNT(*) > 1 LIMIT 1`).get()
+    : null;
+  if (duplicateFund) {
+    throw new Error(`無法升級公帳錢包：帳本 ${duplicateFund.group_id} 有多個舊公帳角色`);
+  }
+  const groups = db.prepare('SELECT id FROM groups ORDER BY created_at').all();
+  const groupIds = new Set(groups.map((group) => group.id));
+  const members = hasLegacyFundRole
+    ? db.prepare('SELECT id, group_id, name, is_fund FROM members').all()
+    : db.prepare('SELECT id, group_id, name, 0 AS is_fund FROM members').all();
+  const memberById = new Map(members.map((member) => [member.id, member]));
+  const fundByGroup = new Map(legacyFunds.map((fund) => [fund.group_id, fund]));
+  const existingWallets = db.prepare('SELECT id, group_id, name FROM ledger_wallets').all();
+  const walletById = new Map(existingWallets.map((wallet) => [wallet.id, wallet]));
+  const walletByGroup = new Map(existingWallets.map((wallet) => [wallet.group_id, wallet]));
+  for (const group of groups) {
+    if (walletByGroup.has(group.id)) continue;
+    const fund = fundByGroup.get(group.id);
+    const wallet = {
+      id: fund?.id || crypto.randomUUID(),
+      group_id: group.id,
+      name: fund?.name || '公帳',
+    };
+    walletByGroup.set(group.id, wallet);
+    walletById.set(wallet.id, wallet);
+  }
+
+  const splitRows = db.prepare(`SELECT s.rowid, s.expense_id, s.member_id, s.amount
+    FROM expense_splits s ORDER BY s.rowid`).all();
+  const splitsByExpense = new Map();
+  for (const split of splitRows) {
+    const splits = splitsByExpense.get(split.expense_id) || [];
+    splits.push(split);
+    splitsByExpense.set(split.expense_id, splits);
+  }
+  const oldExpenses = db.prepare('SELECT rowid, * FROM expenses ORDER BY rowid').all();
+  const convertedExpenses = [];
+  const transferIds = [];
+  let removedTransferSplits = 0;
+
+  const migrationError = (entry, message) => {
+    throw new Error(`無法升級公帳錢包：帳目 ${entry.id} ${message}`);
+  };
+  const walletAccount = (wallet) => ({ type: 'wallet', id: wallet.id });
+  const memberAccount = (member) => ({ type: 'member', id: member.id });
+  const resolveMemberAccount = (entry, memberId, label, allowFund) => {
+    const member = memberById.get(memberId);
+    if (!member || member.group_id !== entry.group_id) {
+      migrationError(entry, `${label}含不存在或跨帳本的成員`);
+    }
+    if (!member.is_fund) return memberAccount(member);
+    if (!allowFund) migrationError(entry, '非轉帳紀錄將舊公帳列為分攤對象');
+    return walletAccount(walletByGroup.get(entry.group_id));
+  };
+  const resolveWalletAccount = (entry, walletId, label) => {
+    const wallet = walletById.get(walletId);
+    if (!wallet || wallet.group_id !== entry.group_id) {
+      migrationError(entry, `${label}含不存在或跨帳本的公帳錢包`);
+    }
+    return walletAccount(wallet);
+  };
+  const sameAccount = (left, right) => left.type === right.type && left.id === right.id;
+
+  for (const entry of oldExpenses) {
+    if (!groupIds.has(entry.group_id)) migrationError(entry, '所屬帳本不存在');
+    const wallet = walletByGroup.get(entry.group_id);
+    const payerId = entry.payer_id ?? null;
+    const payerWalletId = entry.payer_wallet_id ?? null;
+    if ((payerId === null) === (payerWalletId === null)) {
+      migrationError(entry, '必須且只能有一個款項來源');
+    }
+    let source;
+    if (payerId !== null) {
+      const payer = memberById.get(payerId);
+      if (!payer || payer.group_id !== entry.group_id) {
+        migrationError(entry, '付款來源含不存在或跨帳本的成員');
+      }
+      source = payer.is_fund ? walletAccount(wallet) : memberAccount(payer);
+    } else {
+      source = resolveWalletAccount(entry, payerWalletId, '付款來源');
     }
 
-    const removed = db.prepare('DELETE FROM members WHERE is_fund = 1').run().changes;
-    db.exec('ALTER TABLE members DROP COLUMN is_fund');
-    db.prepare(`INSERT INTO admin_config (key, value) VALUES (?, ?)
-      ON CONFLICT(key) DO UPDATE SET value = excluded.value`)
-      .run('remove_public_fund_role_v1', '1');
-    return removed;
-  })();
-  if (removedFunds > 0) console.warn(`已移除 ${removedFunds} 個未使用的舊公帳角色。`);
+    const splits = splitsByExpense.get(entry.id) || [];
+    const parsedSplits = [];
+    for (const split of splits) {
+      let cents;
+      try { cents = moneyToCents(split.amount); } catch {
+        migrationError(entry, '分攤金額格式不正確');
+      }
+      if (cents < 0) migrationError(entry, '分攤金額不能為負數');
+      parsedSplits.push({
+        ...split,
+        cents,
+        account: resolveMemberAccount(entry, split.member_id, '分攤資料', true),
+      });
+    }
+    let amountCents;
+    try { amountCents = moneyToCents(entry.amount); } catch {
+      migrationError(entry, '金額格式不正確');
+    }
+    const isTransfer = entry.kind === 'transfer' || ['還款', '轉帳'].includes(entry.category);
+    let target = null;
+    let transferAmountCents = amountCents;
+    if (isTransfer) {
+      if (amountCents <= 0) migrationError(entry, '轉帳金額必須大於 0');
+      const explicitMemberId = entry.transfer_to_member_id ?? null;
+      const explicitWalletId = entry.transfer_to_wallet_id ?? null;
+      if (explicitMemberId !== null && explicitWalletId !== null) {
+        migrationError(entry, '轉帳有多個去向');
+      }
+      if (explicitMemberId !== null) {
+        target = resolveMemberAccount(entry, explicitMemberId, '轉帳去向', true);
+      } else if (explicitWalletId !== null) {
+        target = resolveWalletAccount(entry, explicitWalletId, '轉帳去向');
+      }
+
+      let splitTarget = null;
+      if (parsedSplits.length > 0) {
+        let splitTotalCents = 0;
+        const nonSourceSplits = [];
+        for (const split of parsedSplits) {
+          if (!Number.isSafeInteger(splitTotalCents + split.cents)) {
+            migrationError(entry, '轉帳分攤總額超過系統上限');
+          }
+          splitTotalCents += split.cents;
+          if (!sameAccount(split.account, source)) nonSourceSplits.push(split);
+        }
+        if (splitTotalCents !== amountCents) {
+          migrationError(entry, '轉帳分攤總額與帳目金額不一致');
+        }
+        if (nonSourceSplits.length !== 1) {
+          migrationError(entry, '轉帳必須且只能有一個非來源收款對象');
+        }
+        const recipient = nonSourceSplits[0];
+        if (recipient.cents <= 0) migrationError(entry, '轉帳實際收款金額必須大於 0');
+        splitTarget = recipient.account;
+        transferAmountCents = recipient.cents;
+      }
+      if (!target) target = splitTarget;
+      if (!target || (splitTarget && !sameAccount(target, splitTarget))) {
+        migrationError(entry, '轉帳的顯式去向與舊分攤資料不一致');
+      }
+      if (sameAccount(source, target)) migrationError(entry, '轉帳來源與去向相同');
+      if (source.type === 'wallet' && target.type === 'wallet') {
+        migrationError(entry, '不支援公帳錢包互轉');
+      }
+      transferIds.push(entry.id);
+      removedTransferSplits += splits.length;
+    } else {
+      if (entry.transfer_to_member_id != null || entry.transfer_to_wallet_id != null) {
+        migrationError(entry, '非轉帳紀錄不應有轉帳去向');
+      }
+      if (splits.length === 0) migrationError(entry, '缺少分攤資料');
+      for (const split of splits) {
+        resolveMemberAccount(entry, split.member_id, '分攤資料', false);
+      }
+    }
+
+    convertedExpenses.push({
+      ...entry,
+      payer_id: source.type === 'member' ? source.id : null,
+      payer_wallet_id: source.type === 'wallet' ? source.id : null,
+      transfer_to_member_id: target?.type === 'member' ? target.id : null,
+      transfer_to_wallet_id: target?.type === 'wallet' ? target.id : null,
+      amount: isTransfer ? centsToMoney(transferAmountCents) : entry.amount,
+      kind: isTransfer ? 'transfer' : entry.kind === 'income' ? 'income' : 'expense',
+    });
+  }
+
+  const beforeExpenseCount = oldExpenses.length;
+  const beforeSplitCount = splitRows.length;
+  const foreignKeysEnabled = db.pragma('foreign_keys', { simple: true }) === 1;
+  db.pragma('foreign_keys = OFF');
+  if (db.pragma('foreign_keys', { simple: true }) !== 0) {
+    throw new Error('無法升級公帳錢包：無法暫停 SQLite 外鍵檢查');
+  }
+  try {
+    db.transaction(() => {
+      for (const group of groups) ensureWallet(group.id, walletByGroup.get(group.id));
+
+      db.exec(`
+        CREATE TABLE expenses_wallet_v1 (
+          id TEXT PRIMARY KEY,
+          group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+          payer_id TEXT REFERENCES members(id),
+          payer_wallet_id TEXT REFERENCES ledger_wallets(id),
+          transfer_to_member_id TEXT REFERENCES members(id),
+          transfer_to_wallet_id TEXT REFERENCES ledger_wallets(id),
+          description TEXT NOT NULL,
+          amount REAL NOT NULL,
+          category TEXT NOT NULL DEFAULT '其他',
+          expense_date TEXT NOT NULL DEFAULT (date('now')),
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          deleted_at TEXT,
+          receipt TEXT,
+          note TEXT,
+          kind TEXT NOT NULL DEFAULT 'expense' CHECK (kind IN ('expense', 'income', 'transfer')),
+          version INTEGER NOT NULL DEFAULT 1,
+          request_key TEXT,
+          CHECK ((payer_id IS NOT NULL) <> (payer_wallet_id IS NOT NULL)),
+          CHECK ((transfer_to_member_id IS NULL) OR (transfer_to_wallet_id IS NULL)),
+          CHECK (
+            (kind = 'transfer' AND ((transfer_to_member_id IS NOT NULL) <> (transfer_to_wallet_id IS NOT NULL)))
+            OR
+            (kind IN ('expense', 'income') AND transfer_to_member_id IS NULL AND transfer_to_wallet_id IS NULL)
+          ),
+          CHECK (payer_id IS NULL OR transfer_to_member_id IS NULL OR payer_id <> transfer_to_member_id),
+          CHECK (payer_wallet_id IS NULL OR transfer_to_wallet_id IS NULL OR payer_wallet_id <> transfer_to_wallet_id)
+        );
+
+      `);
+      const insertExpense = db.prepare(`INSERT INTO expenses_wallet_v1 (
+        id, group_id, payer_id, payer_wallet_id, transfer_to_member_id,
+        transfer_to_wallet_id, description, amount, category, expense_date,
+        created_at, deleted_at, receipt, note, kind, version, request_key
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+      for (const entry of convertedExpenses) {
+        insertExpense.run(
+          entry.id, entry.group_id, entry.payer_id, entry.payer_wallet_id,
+          entry.transfer_to_member_id, entry.transfer_to_wallet_id, entry.description,
+          entry.amount, entry.category, entry.expense_date, entry.created_at,
+          entry.deleted_at, entry.receipt, entry.note, entry.kind, entry.version,
+          entry.request_key
+        );
+      }
+      const deleteTransferSplits = db.prepare(
+        'DELETE FROM expense_splits WHERE expense_id = ?'
+      );
+      for (const expenseId of transferIds) deleteTransferSplits.run(expenseId);
+      db.exec(`
+        DROP TABLE expenses;
+        ALTER TABLE expenses_wallet_v1 RENAME TO expenses;
+        CREATE INDEX idx_expenses_group ON expenses(group_id);
+        CREATE INDEX idx_expenses_transfer_member ON expenses(transfer_to_member_id);
+        CREATE UNIQUE INDEX idx_expenses_request_key
+          ON expenses(request_key) WHERE request_key IS NOT NULL;
+      `);
+
+      if (hasLegacyFundRole) {
+        db.prepare('DELETE FROM members WHERE is_fund = 1').run();
+        db.exec('ALTER TABLE members DROP COLUMN is_fund');
+      }
+      db.prepare(`INSERT INTO admin_config (key, value) VALUES (?, ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value`)
+        .run('ledger_wallet_accounts_v1', '1');
+
+      const afterExpenseCount = db.prepare('SELECT COUNT(*) AS count FROM expenses').get().count;
+      const afterSplitCount = db.prepare('SELECT COUNT(*) AS count FROM expense_splits').get().count;
+      if (afterExpenseCount !== beforeExpenseCount
+        || afterSplitCount !== beforeSplitCount - removedTransferSplits) {
+        throw new Error('公帳錢包遷移筆數核對失敗');
+      }
+      const foreignKeyErrors = db.pragma('foreign_key_check');
+      if (foreignKeyErrors.length) throw new Error('公帳錢包遷移外鍵核對失敗');
+    })();
+  } finally {
+    if (foreignKeysEnabled) db.pragma('foreign_keys = ON');
+  }
+  if (foreignKeysEnabled && db.pragma('foreign_keys', { simple: true }) !== 1) {
+    throw new Error('公帳錢包遷移後無法恢復 SQLite 外鍵檢查');
+  }
 }
+
+db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_expenses_request_key
+  ON expenses(request_key) WHERE request_key IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_expenses_transfer_member ON expenses(transfer_to_member_id);`);
 
 // 舊版在驗證後才逐筆四捨五入，可能留下小額差異或 0 元紀錄。
 const LEDGER_MIGRATION_KEY = 'ledger_integrity_cents_v1';
@@ -144,7 +439,9 @@ const migrationApplied = db.prepare('SELECT 1 FROM admin_config WHERE key = ?')
   .get(LEDGER_MIGRATION_KEY);
 if (!migrationApplied) {
   const migration = db.transaction(() => {
-    const expenses = db.prepare('SELECT id, payer_id, amount FROM expenses').all();
+    const expenses = db.prepare(
+      'SELECT id, payer_id, payer_wallet_id, amount, kind, category FROM expenses'
+    ).all();
     const getSplits = db.prepare(
       'SELECT rowid, member_id, amount FROM expense_splits WHERE expense_id = ? ORDER BY rowid'
     );
@@ -164,6 +461,13 @@ if (!migrationApplied) {
       }
       if (amountCents < 0) {
         unresolved += 1;
+        continue;
+      }
+
+      if (expense.kind === 'transfer' || ['還款', '轉帳'].includes(expense.category)) {
+        if (amountCents === 0) amountCents = 1;
+        const normalizedAmount = centsToMoney(amountCents);
+        if (expense.amount !== normalizedAmount) updateExpense.run(normalizedAmount, expense.id);
         continue;
       }
 
@@ -202,11 +506,15 @@ if (!migrationApplied) {
       if (difference === 0) continue;
       repaired += 1;
       if (difference > 0) {
-        const payerSplit = splits.find((split) => split.member_id === expense.payer_id);
+        const payerSplit = splits.find((split) => split.member_id === expense.payer_id)
+          || (expense.payer_wallet_id ? splits[0] : null);
         if (payerSplit) {
           updateSplit.run(centsToMoney(payerSplit.cents + difference), payerSplit.rowid);
-        } else {
+        } else if (expense.payer_id) {
           insertSplit.run(expense.id, expense.payer_id, centsToMoney(difference));
+        } else {
+          repaired -= 1;
+          unresolved += 1;
         }
         continue;
       }
@@ -225,18 +533,16 @@ if (!migrationApplied) {
       }
     }
 
-    if (unresolved === 0) {
-      db.prepare('INSERT INTO admin_config (key, value) VALUES (?, ?)')
-        .run(LEDGER_MIGRATION_KEY, '1');
+    if (unresolved > 0) {
+      throw new Error(`帳務資料完整性遷移失敗：有 ${unresolved} 筆紀錄無法安全自動修復`);
     }
+    db.prepare('INSERT INTO admin_config (key, value) VALUES (?, ?)')
+      .run(LEDGER_MIGRATION_KEY, '1');
     return { repaired, unresolved };
   })();
 
   if (migration.repaired > 0) {
     console.warn(`已修復 ${migration.repaired} 筆舊版分攤金額誤差。`);
-  }
-  if (migration.unresolved > 0) {
-    console.warn(`有 ${migration.unresolved} 筆帳務資料無法安全自動修復，請檢查資料庫。`);
   }
 }
 
@@ -250,11 +556,181 @@ db.seedCategories = (groupId) => {
   if (has) return;
   const ins = db.prepare('INSERT INTO categories (id, group_id, name, icon, sort) VALUES (?, ?, ?, ?, ?)');
   DEFAULT_CATEGORIES.forEach(([name, icon], i) => {
-    ins.run(require('crypto').randomUUID(), groupId, name, icon, i);
+    ins.run(crypto.randomUUID(), groupId, name, icon, i);
   });
 };
+db.seedWallet = (groupId) => ensureWallet(groupId);
+
+// SQLite 外鍵只能確認 ID 存在，這些 trigger 再保證交易雙方都屬於同一本帳。
+db.exec(`
+DROP TRIGGER IF EXISTS expenses_account_group_insert;
+DROP TRIGGER IF EXISTS expenses_account_group_update;
+DROP TRIGGER IF EXISTS expense_splits_group_insert;
+DROP TRIGGER IF EXISTS expense_splits_group_update;
+DROP TRIGGER IF EXISTS expenses_transfer_cleanup;
+DROP TRIGGER IF EXISTS members_group_immutable;
+DROP TRIGGER IF EXISTS ledger_wallets_group_immutable;
+
+CREATE TRIGGER expenses_account_group_insert
+BEFORE INSERT ON expenses BEGIN
+  SELECT RAISE(ABORT, 'reserved transfer category requires transfer kind')
+    WHERE NEW.category IN ('還款', '轉帳') AND NEW.kind <> 'transfer';
+  SELECT RAISE(ABORT, 'payer member belongs to another group')
+    WHERE NEW.payer_id IS NOT NULL AND NOT EXISTS (
+      SELECT 1 FROM members WHERE id = NEW.payer_id AND group_id = NEW.group_id
+    );
+  SELECT RAISE(ABORT, 'payer wallet belongs to another group')
+    WHERE NEW.payer_wallet_id IS NOT NULL AND NOT EXISTS (
+      SELECT 1 FROM ledger_wallets WHERE id = NEW.payer_wallet_id AND group_id = NEW.group_id
+    );
+  SELECT RAISE(ABORT, 'target member belongs to another group')
+    WHERE NEW.transfer_to_member_id IS NOT NULL AND NOT EXISTS (
+      SELECT 1 FROM members WHERE id = NEW.transfer_to_member_id AND group_id = NEW.group_id
+    );
+  SELECT RAISE(ABORT, 'target wallet belongs to another group')
+    WHERE NEW.transfer_to_wallet_id IS NOT NULL AND NOT EXISTS (
+      SELECT 1 FROM ledger_wallets WHERE id = NEW.transfer_to_wallet_id AND group_id = NEW.group_id
+    );
+END;
+
+CREATE TRIGGER expenses_account_group_update
+BEFORE UPDATE OF group_id, payer_id, payer_wallet_id, transfer_to_member_id,
+  transfer_to_wallet_id, kind, category
+ON expenses BEGIN
+  SELECT RAISE(ABORT, 'reserved transfer category requires transfer kind')
+    WHERE NEW.category IN ('還款', '轉帳') AND NEW.kind <> 'transfer';
+  SELECT RAISE(ABORT, 'payer member belongs to another group')
+    WHERE NEW.payer_id IS NOT NULL AND NOT EXISTS (
+      SELECT 1 FROM members WHERE id = NEW.payer_id AND group_id = NEW.group_id
+    );
+  SELECT RAISE(ABORT, 'payer wallet belongs to another group')
+    WHERE NEW.payer_wallet_id IS NOT NULL AND NOT EXISTS (
+      SELECT 1 FROM ledger_wallets WHERE id = NEW.payer_wallet_id AND group_id = NEW.group_id
+    );
+  SELECT RAISE(ABORT, 'target member belongs to another group')
+    WHERE NEW.transfer_to_member_id IS NOT NULL AND NOT EXISTS (
+      SELECT 1 FROM members WHERE id = NEW.transfer_to_member_id AND group_id = NEW.group_id
+    );
+  SELECT RAISE(ABORT, 'target wallet belongs to another group')
+    WHERE NEW.transfer_to_wallet_id IS NOT NULL AND NOT EXISTS (
+      SELECT 1 FROM ledger_wallets WHERE id = NEW.transfer_to_wallet_id AND group_id = NEW.group_id
+    );
+  SELECT RAISE(ABORT, 'split member belongs to another group')
+    WHERE EXISTS (
+      SELECT 1 FROM expense_splits s
+      JOIN members m ON m.id = s.member_id
+      WHERE s.expense_id = NEW.id AND m.group_id <> NEW.group_id
+    );
+END;
+
+CREATE TRIGGER expense_splits_group_insert
+BEFORE INSERT ON expense_splits BEGIN
+  SELECT RAISE(ABORT, 'transfer entries cannot have splits')
+    WHERE EXISTS (
+      SELECT 1 FROM expenses WHERE id = NEW.expense_id AND kind = 'transfer'
+    );
+  SELECT RAISE(ABORT, 'split member belongs to another group')
+    WHERE NOT EXISTS (
+      SELECT 1 FROM expenses e JOIN members m ON m.id = NEW.member_id
+      WHERE e.id = NEW.expense_id AND e.group_id = m.group_id
+    );
+END;
+
+CREATE TRIGGER expense_splits_group_update
+BEFORE UPDATE OF expense_id, member_id ON expense_splits BEGIN
+  SELECT RAISE(ABORT, 'transfer entries cannot have splits')
+    WHERE EXISTS (
+      SELECT 1 FROM expenses WHERE id = NEW.expense_id AND kind = 'transfer'
+    );
+  SELECT RAISE(ABORT, 'split member belongs to another group')
+    WHERE NOT EXISTS (
+      SELECT 1 FROM expenses e JOIN members m ON m.id = NEW.member_id
+      WHERE e.id = NEW.expense_id AND e.group_id = m.group_id
+    );
+END;
+
+CREATE TRIGGER expenses_transfer_cleanup
+AFTER UPDATE OF kind ON expenses
+WHEN NEW.kind = 'transfer' BEGIN
+  DELETE FROM expense_splits WHERE expense_id = NEW.id;
+END;
+
+CREATE TRIGGER members_group_immutable
+BEFORE UPDATE OF group_id ON members
+WHEN NEW.group_id <> OLD.group_id BEGIN
+  SELECT RAISE(ABORT, 'member group cannot be changed');
+END;
+
+CREATE TRIGGER ledger_wallets_group_immutable
+BEFORE UPDATE OF group_id ON ledger_wallets
+WHEN NEW.group_id <> OLD.group_id BEGIN
+  SELECT RAISE(ABORT, 'wallet group cannot be changed');
+END;
+`);
+
 for (const g of db.prepare('SELECT id FROM groups').all()) {
   db.seedCategories(g.id);
+  db.seedWallet(g.id);
 }
+
+const invalidAccountGroup = db.prepare(`SELECT e.id FROM expenses e
+  LEFT JOIN members payer ON payer.id = e.payer_id
+  LEFT JOIN ledger_wallets payer_wallet ON payer_wallet.id = e.payer_wallet_id
+  LEFT JOIN members target ON target.id = e.transfer_to_member_id
+  LEFT JOIN ledger_wallets target_wallet ON target_wallet.id = e.transfer_to_wallet_id
+  WHERE (e.payer_id IS NOT NULL AND (payer.id IS NULL OR payer.group_id <> e.group_id))
+    OR (e.payer_wallet_id IS NOT NULL
+      AND (payer_wallet.id IS NULL OR payer_wallet.group_id <> e.group_id))
+    OR (e.transfer_to_member_id IS NOT NULL
+      AND (target.id IS NULL OR target.group_id <> e.group_id))
+    OR (e.transfer_to_wallet_id IS NOT NULL
+      AND (target_wallet.id IS NULL OR target_wallet.group_id <> e.group_id))
+  LIMIT 1`).get();
+const invalidSplitGroup = db.prepare(`SELECT e.id FROM expenses e
+  JOIN expense_splits s ON s.expense_id = e.id
+  LEFT JOIN members m ON m.id = s.member_id
+  WHERE m.id IS NULL OR m.group_id <> e.group_id LIMIT 1`).get();
+const transferWithSplits = db.prepare(`SELECT e.id FROM expenses e
+  JOIN expense_splits s ON s.expense_id = e.id
+  WHERE e.kind = 'transfer' LIMIT 1`).get();
+const noncanonicalTransfer = db.prepare(`SELECT id FROM expenses
+  WHERE category IN ('還款', '轉帳') AND kind <> 'transfer' LIMIT 1`).get();
+if (invalidAccountGroup || invalidSplitGroup || transferWithSplits || noncanonicalTransfer) {
+  const invalidId = invalidAccountGroup?.id || invalidSplitGroup?.id
+    || transferWithSplits?.id || noncanonicalTransfer.id;
+  throw new Error(`帳務資料完整性檢查失敗：帳目 ${invalidId} 的帳戶或分攤關聯不正確`);
+}
+const foreignKeyErrors = db.pragma('foreign_key_check');
+if (foreignKeyErrors.length) {
+  throw new Error(`帳務資料完整性檢查失敗：發現 ${foreignKeyErrors.length} 個外鍵錯誤`);
+}
+
+const auditSplitsByExpense = new Map();
+for (const split of db.prepare(
+  'SELECT expense_id, member_id, amount FROM expense_splits ORDER BY rowid'
+).all()) {
+  const splits = auditSplitsByExpense.get(split.expense_id) || [];
+  splits.push({ member_id: split.member_id, amount: split.amount });
+  auditSplitsByExpense.set(split.expense_id, splits);
+}
+const auditExpenses = db.prepare('SELECT * FROM expenses WHERE group_id = ? ORDER BY rowid');
+const auditMembers = db.prepare('SELECT id FROM members WHERE group_id = ? ORDER BY rowid');
+const auditWallets = db.prepare('SELECT id FROM ledger_wallets WHERE group_id = ? ORDER BY rowid');
+for (const group of db.prepare('SELECT id FROM groups ORDER BY rowid').all()) {
+  const expenses = auditExpenses.all(group.id);
+  for (const expense of expenses) {
+    expense.splits = auditSplitsByExpense.get(expense.id) || [];
+  }
+  try {
+    calculateLedger(auditMembers.all(group.id), expenses, auditWallets.all(group.id));
+  } catch (error) {
+    throw new Error(
+      `帳務資料完整性檢查失敗：帳本 ${group.id} 無法守恆（${error.message}）`
+    );
+  }
+}
+db.prepare(`INSERT INTO admin_config (key, value) VALUES (?, ?)
+  ON CONFLICT(key) DO UPDATE SET value = excluded.value`)
+  .run('ledger_wallet_accounts_v1', '1');
 
 module.exports = db;
