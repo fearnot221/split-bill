@@ -82,6 +82,26 @@ test('expense sheet, receipt viewer, and native selects use the current UI primi
   assert.match(html, /id="modal-toast"[^>]+role="status"/);
 });
 
+test('light and dark themes follow the operating system without a manual preference', () => {
+  for (const page of [html, adminHtml]) {
+    assert.match(page, /<meta name="color-scheme" content="light dark">/);
+    assert.match(page, /<meta name="theme-color" content="#f5f3ee" media="\(prefers-color-scheme: light\)">/);
+    assert.match(page, /<meta name="theme-color" content="#191813" media="\(prefers-color-scheme: dark\)">/);
+    assert.match(page, /href="style\.css\?v=39"/);
+  }
+  assert.match(styles, /:root \{[\s\S]*?color-scheme: light dark;/);
+  assert.match(styles, /@media \(prefers-color-scheme: dark\) \{[\s\S]*?--paper: #191813;/);
+  assert.match(styles, /--select-arrow: url\([^\n]+stroke='%236f695f'/);
+  assert.match(styles, /@media \(prefers-color-scheme: dark\) \{[\s\S]*?--select-arrow: url\([^\n]+stroke='%23a19b8d'/);
+  assert.match(styles, /html \{ background: var\(--paper\);/);
+  assert.match(styles, /select \{\s*background-image: var\(--select-arrow\);/);
+  assert.match(styles, /\.date-picker__day\.adjacent \{ color: var\(--sub\); \}/);
+  assert.doesNotMatch(styles, /\.date-picker__day\.adjacent[^\n]+opacity:/);
+  assert.match(styles, /#expense-list \.expense-del \{[^}]*opacity: \.8;/);
+  assert.doesNotMatch(styles, /\.expense-note \{[^}]*opacity:/);
+  assert.match(readme, /深淺色模式會自動跟隨系統設定/);
+});
+
 test('all date fields use one accessible custom calendar dialog', () => {
   assert.doesNotMatch(html, /type="date"/);
   const dateInputs = [...html.matchAll(/<input\b[^>]*\bid="(stats-from|stats-to|exp-date)"[^>]*>/g)];

@@ -6,7 +6,7 @@
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  color-scheme: light;
+  color-scheme: light dark;
   --paper: #f5f3ee;
   --card: #fbfaf6;
   --ink: #26231d;
@@ -17,6 +17,7 @@
   --green: #3d7a55;
   --red: #a64d44;
   --warn: #9a712d;
+  --select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%236f695f' stroke-width='1.6' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
   --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
   --visual-viewport-height: 100dvh;
   --visual-viewport-top: 0px;
@@ -24,7 +25,6 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    color-scheme: dark;
     --paper: #191813;
     --card: #201f1a;
     --ink: #e8e4da;
@@ -35,10 +35,11 @@
     --green: #8fbf9f;
     --red: #cf8e85;
     --warn: #d0a75f;
+    --select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23a19b8d' stroke-width='1.6' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
   }
 }
 
-html { -webkit-text-size-adjust: 100%; scrollbar-width: none; }
+html { background: var(--paper); -webkit-text-size-adjust: 100%; scrollbar-width: none; }
 html::-webkit-scrollbar, body::-webkit-scrollbar { display: none; }
 
 body {
@@ -227,7 +228,7 @@ input[aria-invalid="true"], select[aria-invalid="true"], textarea[aria-invalid="
 input::placeholder, textarea::placeholder { color: var(--sub); opacity: 1; }
 input[type="number"] { font-family: var(--mono); font-size: 1rem; }
 select {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%238a8375' stroke-width='1.6' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-image: var(--select-arrow);
   background-repeat: no-repeat;
   background-position: right 12px center;
   padding-right: 36px;
@@ -780,7 +781,6 @@ select.app-select option { color: var(--ink); background: var(--card); }
 .expense-note {
   font-size: .74rem;
   color: var(--sub);
-  opacity: .85;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -802,7 +802,7 @@ select.app-select option { color: var(--ink); background: var(--card); }
   align-self: stretch;
   place-items: center;
   padding: 0;
-  opacity: .65;
+  opacity: .8;
 }
 .expense-del svg { width: 14px; height: 14px; }
 .expense-del:hover { opacity: 1; color: var(--red); }
@@ -1300,7 +1300,7 @@ select.app-select option { color: var(--ink); background: var(--card); }
   touch-action: manipulation;
 }
 .date-picker__day:hover { background: var(--fill); }
-.date-picker__day.adjacent { color: var(--sub); opacity: .58; }
+.date-picker__day.adjacent { color: var(--sub); }
 .date-picker__day.today { border-color: var(--rule-strong); }
 .date-picker__day.selected {
   color: var(--paper);
