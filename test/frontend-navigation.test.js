@@ -87,7 +87,7 @@ test('light and dark themes follow the operating system without a manual prefere
     assert.match(page, /<meta name="color-scheme" content="light dark">/);
     assert.match(page, /<meta name="theme-color" content="#f5f3ee" media="\(prefers-color-scheme: light\)">/);
     assert.match(page, /<meta name="theme-color" content="#191813" media="\(prefers-color-scheme: dark\)">/);
-    assert.match(page, /href="style\.css\?v=40"/);
+    assert.match(page, /href="style\.css\?v=41"/);
   }
   assert.match(styles, /:root \{[\s\S]*?color-scheme: light dark;/);
   assert.match(styles, /@media \(prefers-color-scheme: dark\) \{[\s\S]*?--paper: #191813;/);
@@ -171,16 +171,110 @@ test('date picker stays reachable in short viewports and keeps 44px targets at 3
   assert.match(styles, /\.date-picker__day \{[^}]*min-height: 44px;/);
 });
 
-test('AI analysis exposes one live progress message without duplicating feedback', () => {
+test('AI analysis keeps one permanent live status and an accessible cancel action', () => {
   assert.match(
     html,
-    /id="smart-progress"[^>]*role="status"[^>]*aria-live="polite"[^>]*aria-atomic="true"[^>]*aria-hidden="true"/
+    /id="smart-status"[^>]*role="status"[^>]*aria-live="polite"[^>]*aria-atomic="true"/
+  );
+  const progressMarkup = html.match(/<div id="smart-progress"[^>]*>/)?.[0] || '';
+  const feedbackMarkup = html.match(/<p id="smart-feedback"[^>]*>/)?.[0] || '';
+  const smartStatusIndex = html.indexOf('id="smart-status"');
+  const busyRegionIndex = html.indexOf('id="smart-input-wrap"');
+  const hiddenFeedbackIndex = html.indexOf('class="smart-feedback-row"');
+  assert.ok(smartStatusIndex >= 0 && smartStatusIndex < busyRegionIndex);
+  assert.ok(smartStatusIndex < hiddenFeedbackIndex);
+  assert.match(progressMarkup, /aria-hidden="true"/);
+  assert.doesNotMatch(progressMarkup, /role="status"|aria-live=/);
+  assert.doesNotMatch(feedbackMarkup, /role="status"|aria-live=/);
+  assert.match(app, /\$\('#smart-status'\)\.textContent = `\$\{title\}。\$\{detail\}`;/);
+  assert.match(app, /\$\('#smart-status'\)\.textContent = message;/);
+
+  const analyzingFunction = app.match(
+    /function setSmartAnalyzing\(analyzing\) \{[\s\S]*?\n\}\n\nfunction cancelSmartAnalysis/
+  )?.[0] || '';
+  const clearFeedbackIndex = analyzingFunction.indexOf("setSmartFeedback('');");
+  const initialProgressIndex = analyzingFunction.indexOf('updateSmartProgress();');
+  assert.ok(clearFeedbackIndex >= 0);
+  assert.ok(initialProgressIndex >= 0);
+  assert.ok(clearFeedbackIndex < initialProgressIndex);
+  assert.match(
+    analyzingFunction,
+    /setTimeout\(\(\) => updateSmartProgress\(1\), 4500\)[\s\S]*?setTimeout\(\(\) => updateSmartProgress\(2\), 12000\)/
+  );
+  assert.match(analyzingFunction, /cancelButton\.focus\(\{ preventScroll: true \}\);/);
+  assert.match(analyzingFunction, /cancelButton\.scrollIntoView\(\{ block: 'nearest', inline: 'nearest' \}\);/);
+  assert.doesNotMatch(analyzingFunction, /moveFocusToCancel/);
+  assert.match(
+    analyzingFunction,
+    /if \(analyzing && smartSpeechRecognition\) \{\s*try \{ smartSpeechRecognition\.abort\(\); \} catch \{\}/
   );
   assert.match(
     app,
-    /if \(analyzing\) \{\s*updateSmartProgress\(\);\s*setSmartFeedback\(''\);[\s\S]*?setTimeout\(\(\) => updateSmartProgress\(1\), 4500\)[\s\S]*?setTimeout\(\(\) => updateSmartProgress\(2\), 12000\)/
+    /recognition\.onstart = \(\) => \{\s*if \(smartAnalyzing\) \{\s*recognition\.abort\(\);\s*return;/
+  );
+  assert.match(
+    app,
+    /recognition\.onresult = \(event\) => \{\s*if \(smartAnalyzing\) \{\s*recognition\.abort\(\);\s*return;/
+  );
+  assert.match(
+    app,
+    /if \(ev\.key === 'Escape' && smartAnalyzing && !modal\.open\) \{\s*ev\.preventDefault\(\);\s*cancelSmartAnalysis\(\);\s*return;/
   );
   assert.doesNotMatch(app, /setSmartFeedback\(`\$\{updateSmartProgress\(/);
+  assert.match(app, /\.smart-entry'\)\.classList\.toggle\('is-analyzing', analyzing\)/);
+  assert.match(app, /document\.body\.classList\.toggle\('smart-analysis-active', analyzing\)/);
+  assert.match(
+    styles,
+    /\.smart-entry\.is-analyzing #smart-receipt,[\s\S]*?\.smart-entry\.is-analyzing \.smart-privacy \{ display: none; \}/
+  );
+  assert.match(
+    styles,
+    /\.smart-entry\.is-analyzing \.smart-actions > :not\(#btn-smart-analyze\) \{ display: none; \}/
+  );
+  assert.match(styles, /body\.smart-analysis-active \.tab-bar,/);
+  assert.match(html, /src="app\.js\?v=64"/);
+});
+
+test('optional smart participants stay collapsed and summarize explicit selections', () => {
+  assert.match(
+    html,
+    /id="btn-smart-participants-toggle"[^>]*aria-expanded="false"[^>]*aria-controls="smart-participants-panel"/
+  );
+  assert.match(
+    html,
+    /id="smart-participants-panel" class="smart-participants-panel hidden" aria-hidden="true"/
+  );
+  assert.match(html, /id="smart-participants-summary">依分帳文字判斷<\/span>/);
+  assert.match(app, /let smartParticipantsOpen = false;/);
+  assert.match(
+    app,
+    /panel\.classList\.toggle\('hidden', !smartParticipantsOpen\);[\s\S]*?panel\.setAttribute\('aria-hidden', String\(!smartParticipantsOpen\)\);/
+  );
+  assert.match(
+    app,
+    /\$\('#btn-smart-participants-toggle'\)\.addEventListener\('click',[\s\S]*?smartParticipantsOpen = !smartParticipantsOpen;[\s\S]*?renderSmartParticipants\(\);/
+  );
+  assert.match(styles, /\.smart-participants-toggle \{[^}]*min-height: 48px;/);
+  assert.match(styles, /#smart-participants-summary \{[^}]*text-overflow: ellipsis;/);
+  assert.match(readme, /選填的分帳對象預設收合/);
+
+  const summaryFunction = app.match(
+    /function smartParticipantSelectionSummary\(people = \[\], selectedIds = new Set\(\)\) \{[\s\S]*?\n\}/
+  );
+  assert.ok(summaryFunction);
+  const sandbox = {};
+  vm.runInNewContext(`${summaryFunction[0]}; results = {
+    none: smartParticipantSelectionSummary([{ id: 'a', name: '小明' }], new Set()),
+    two: smartParticipantSelectionSummary([
+      { id: 'a', name: '小明' }, { id: 'b', name: '小美' }
+    ], new Set(['a', 'b'])),
+    many: smartParticipantSelectionSummary([
+      { id: 'a', name: '小明' }, { id: 'b', name: '小美' }, { id: 'c', name: '阿華' }
+    ], new Set(['a', 'b', 'c'])),
+  };`, sandbox);
+  assert.equal(sandbox.results.none, '依分帳文字判斷');
+  assert.equal(sandbox.results.two, '小明、小美');
+  assert.equal(sandbox.results.many, '已選 3 位');
 });
 
 test('managed forms and tooltips avoid browser-native mobile popovers', () => {

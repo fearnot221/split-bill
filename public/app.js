@@ -71,6 +71,7 @@ let smartReceiptTask = null;
 let smartReceiptSequence = 0;
 let cachedSafetySessionId = null;
 let smartParticipantIds = new Set();
+let smartParticipantsOpen = false;
 let smartParticipantsExpanded = false;
 let smartInputComposing = false;
 let smartInputCompositionJustEnded = false;
@@ -964,6 +965,13 @@ function selectedSmartParticipantIds() {
   return people.filter((member) => smartParticipantIds.has(member.id)).map((member) => member.id);
 }
 
+function smartParticipantSelectionSummary(people = [], selectedIds = new Set()) {
+  const selectedPeople = people.filter((member) => selectedIds.has(member.id));
+  if (selectedPeople.length === 0) return '依分帳文字判斷';
+  if (selectedPeople.length <= 2) return selectedPeople.map((member) => member.name).join('、');
+  return `已選 ${selectedPeople.length} 位`;
+}
+
 function syncSmartParticipantControls() {
   const selectedIds = new Set(selectedSmartParticipantIds());
   $$('#smart-participant-list .smart-participant').forEach((button) => {
@@ -975,6 +983,7 @@ function syncSmartParticipantControls() {
   const clear = $('#btn-smart-participants-clear');
   clear.classList.toggle('hidden', selectedIds.size === 0);
   clear.disabled = smartAnalyzing;
+  $('#btn-smart-participants-toggle').disabled = smartAnalyzing;
   $('#btn-smart-participants-more').disabled = smartAnalyzing;
 }
 
@@ -983,6 +992,17 @@ function renderSmartParticipants(members = state.data?.members || []) {
   if (people.length <= 6) smartParticipantsExpanded = false;
   const container = $('#smart-participants');
   container.classList.toggle('hidden', people.length === 0);
+  const selectionSummary = smartParticipantSelectionSummary(people, smartParticipantIds);
+  const toggle = $('#btn-smart-participants-toggle');
+  const panel = $('#smart-participants-panel');
+  $('#smart-participants-summary').textContent = selectionSummary;
+  toggle.setAttribute('aria-expanded', String(smartParticipantsOpen));
+  toggle.setAttribute(
+    'aria-label',
+    `分帳對象，${selectionSummary}，${smartParticipantsOpen ? '收合' : '展開'}選項`
+  );
+  panel.classList.toggle('hidden', !smartParticipantsOpen);
+  panel.setAttribute('aria-hidden', String(!smartParticipantsOpen));
   const list = $('#smart-participant-list');
   const selectedIds = new Set(selectedSmartParticipantIds());
   const firstPeople = people.slice(0, 6);
@@ -1051,6 +1071,7 @@ function updateSmartProgress(stage = 0) {
   const { title, detail } = smartProgressMessage(stage);
   $('#smart-progress-title').textContent = title;
   $('#smart-progress-detail').textContent = detail;
+  $('#smart-status').textContent = `${title}。${detail}`;
   return title;
 }
 
@@ -1058,6 +1079,7 @@ function setSmartFeedback(message, error = false, { showAddMember = false } = {}
   const feedback = $('#smart-feedback');
   feedback.textContent = message;
   feedback.classList.toggle('error', error);
+  $('#smart-status').textContent = message;
   $('#smart-add-member').classList.toggle('hidden', !showAddMember);
 }
 
@@ -1084,13 +1106,13 @@ function resizeSmartInput() {
 }
 
 function setSmartAnalyzing(analyzing) {
-  const moveFocusToCancel = analyzing && document.activeElement === $('#smart-input');
   smartProgressTimers.forEach(clearTimeout);
   smartProgressTimers = [];
   smartAnalyzing = analyzing;
-  if (analyzing && smartSpeechRecognition
-    && $('#btn-smart-voice').getAttribute('aria-pressed') === 'true') {
-    smartSpeechRecognition.abort();
+  $('.smart-entry').classList.toggle('is-analyzing', analyzing);
+  document.body.classList.toggle('smart-analysis-active', analyzing);
+  if (analyzing && smartSpeechRecognition) {
+    try { smartSpeechRecognition.abort(); } catch {}
   }
   $('#smart-input-wrap').setAttribute('aria-busy', String(analyzing));
   $('#smart-input').disabled = analyzing;
@@ -1108,15 +1130,16 @@ function setSmartAnalyzing(analyzing) {
   syncSmartAnalyzeButton();
   const progress = $('#smart-progress');
   progress.classList.toggle('hidden', !analyzing);
-  progress.setAttribute('aria-hidden', String(!analyzing));
   if (analyzing) {
-    updateSmartProgress();
     setSmartFeedback('');
+    updateSmartProgress();
     smartProgressTimers = [
       setTimeout(() => updateSmartProgress(1), 4500),
       setTimeout(() => updateSmartProgress(2), 12000),
     ];
-    if (moveFocusToCancel) $('#btn-smart-analyze').focus({ preventScroll: true });
+    const cancelButton = $('#btn-smart-analyze');
+    cancelButton.focus({ preventScroll: true });
+    cancelButton.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }
 }
 
@@ -1235,6 +1258,7 @@ function clearSmartEntry() {
   smartReceiptSequence += 1;
   smartReceiptTask = null;
   smartParticipantIds.clear();
+  smartParticipantsOpen = false;
   smartParticipantsExpanded = false;
   aiDraftActive = false;
   aiDraftConsumesSmartEntry = false;
@@ -1339,12 +1363,20 @@ function setupSmartSpeechInput() {
   recognition.interimResults = true;
   recognition.continuous = false;
   recognition.onstart = () => {
+    if (smartAnalyzing) {
+      recognition.abort();
+      return;
+    }
     receivedFinalSpeech = false;
     speechErrored = false;
     button.setAttribute('aria-pressed', 'true');
     setSmartFeedback('正在聽取記帳內容…');
   };
   recognition.onresult = (event) => {
+    if (smartAnalyzing) {
+      recognition.abort();
+      return;
+    }
     let finalText = '';
     let interimText = '';
     for (let index = event.resultIndex; index < event.results.length; index += 1) {
@@ -1364,7 +1396,7 @@ function setupSmartSpeechInput() {
   };
   recognition.onerror = (event) => {
     speechErrored = true;
-    if (event.error === 'aborted') return;
+    if (event.error === 'aborted' || smartAnalyzing) return;
     const message = event.error === 'not-allowed'
       ? '麥克風權限未開啟'
       : event.error === 'no-speech' ? '沒有聽到語音，請再試一次' : '語音辨識失敗';
@@ -1746,6 +1778,11 @@ $('#btn-smart-receipt-view').addEventListener('click', () => {
 $('#btn-smart-analyze').addEventListener('click', () => {
   if (smartAnalyzing) cancelSmartAnalysis();
   else analyzeSmartEntry();
+});
+$('#btn-smart-participants-toggle').addEventListener('click', () => {
+  if (smartAnalyzing) return;
+  smartParticipantsOpen = !smartParticipantsOpen;
+  renderSmartParticipants();
 });
 $('#smart-participant-list').addEventListener('click', (ev) => {
   const button = ev.target.closest('.smart-participant');
@@ -2488,6 +2525,11 @@ $('#modal-expense').addEventListener('cancel', async (event) => {
 document.addEventListener('keydown', (ev) => {
   if ($('#receipt-lightbox').open || $('#app-dialog').open || window.AppDatePicker?.isOpen()) return;
   const modal = $('#modal-expense');
+  if (ev.key === 'Escape' && smartAnalyzing && !modal.open) {
+    ev.preventDefault();
+    cancelSmartAnalysis();
+    return;
+  }
   if (!modal.open || modal.classList.contains('closing')) return;
   if ((ev.metaKey || ev.ctrlKey) && ev.key === 'Enter' && !expenseSubmitting) {
     ev.preventDefault();

@@ -7,7 +7,7 @@
   <meta name="theme-color" content="#f5f3ee" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#191813" media="(prefers-color-scheme: dark)">
   <title>分帳小工具 — 記帳分帳</title>
-  <link rel="stylesheet" href="style.css?v=40">
+  <link rel="stylesheet" href="style.css?v=41">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%2344705a'/><text x='50' y='72' font-size='60' text-anchor='middle' fill='white' font-family='Helvetica,Arial,sans-serif' font-weight='bold'>$</text></svg>">
 </head>
 <body>
@@ -47,12 +47,13 @@
             <h2 id="smart-entry-title">一句記帳</h2>
             <span id="smart-mode" class="smart-mode">準備中</span>
           </div>
+          <p id="smart-status" class="visually-hidden" role="status"
+            aria-live="polite" aria-atomic="true"></p>
           <label class="visually-hidden" for="smart-input">記帳內容</label>
           <div id="smart-input-wrap" class="smart-input-wrap" aria-busy="false">
             <textarea id="smart-input" class="smart-input" rows="3" maxlength="2000" enterkeyhint="send"
               placeholder="例如：昨天晚餐 1,280，我付的，我跟小明、小美均分"></textarea>
-            <div id="smart-progress" class="smart-progress hidden" role="status"
-              aria-live="polite" aria-atomic="true" aria-hidden="true">
+            <div id="smart-progress" class="smart-progress hidden" aria-hidden="true">
               <span class="smart-progress-spinner"></span>
               <span class="smart-progress-copy">
                 <strong id="smart-progress-title">正在理解分帳內容</strong>
@@ -71,16 +72,22 @@
             </button>
           </div>
           <div id="smart-participants" class="smart-participants">
-            <div class="smart-participants-head">
+            <button type="button" id="btn-smart-participants-toggle" class="smart-participants-toggle"
+              aria-expanded="false" aria-controls="smart-participants-panel">
               <span id="smart-participants-label">分帳對象 <small>選填</small></span>
-              <span class="smart-participants-actions">
+              <span id="smart-participants-summary">依分帳文字判斷</span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+            </button>
+            <div id="smart-participants-panel" class="smart-participants-panel hidden" aria-hidden="true">
+              <div id="smart-participant-list" class="smart-participant-list"
+                role="group" aria-labelledby="smart-participants-label"></div>
+              <div class="smart-participants-actions">
                 <button type="button" id="btn-smart-participants-more" class="pill-btn hidden"
                   aria-expanded="false" aria-controls="smart-participant-list">更多</button>
                 <button type="button" id="btn-smart-participants-clear" class="pill-btn hidden">清除</button>
-              </span>
+              </div>
             </div>
-            <div id="smart-participant-list" class="smart-participant-list"
-              role="group" aria-labelledby="smart-participants-label"></div>
           </div>
           <div class="smart-actions">
             <input type="file" id="smart-receipt-file" accept="image/*" class="hidden">
@@ -104,7 +111,7 @@
             </button>
           </div>
           <div class="smart-feedback-row">
-            <p id="smart-feedback" class="smart-feedback" role="status" aria-live="polite" aria-atomic="true"></p>
+            <p id="smart-feedback" class="smart-feedback"></p>
             <a id="smart-add-member" class="pill-btn hidden" href="/admin">新增成員</a>
           </div>
           <div id="smart-recents" class="smart-recents hidden">
@@ -434,6 +441,6 @@
   <script src="ui-dialog.js?v=2"></script>
   <script src="ui-form.js?v=2"></script>
   <script src="ui-date-picker.js?v=1"></script>
-  <script src="app.js?v=62"></script>
+  <script src="app.js?v=64"></script>
 </body>
 </html>
